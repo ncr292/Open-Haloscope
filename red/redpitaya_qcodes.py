@@ -301,7 +301,10 @@ class Redpitaya(VisaInstrument):
                             get_parser=int,)
                             #initial_value = int(1) )
 
+
 ######################################################################
+
+
         self.add_parameter('status',
                            set_cmd='{}',
                            vals=vals.Enum('start', 'stop'),
