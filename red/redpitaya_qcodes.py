@@ -1,979 +1,330 @@
-# -*- coding: utf-8 -*-
-# This is a Qcodes driver for Redpitaya card SCPI IQ server 
-# written by Martina Esposito and Arpit Ranadive, 2019/2020
-#
-
-from time import sleep
-import time 
-import numpy as np
-#import qt
-#import ctypes  # only for DLL-based instrument
-
-import qcodes as qc
-from qcodes import (Instrument, VisaInstrument,
-                    ManualParameter, MultiParameter,
-                    validators as vals)
-from qcodes.instrument.channel import InstrumentChannel
-import matplotlib.pyplot as plt
-from qcodes.instrument.parameter import ParameterWithSetpoints, Parameter
-from qcodes.utils.validators import Numbers, Arrays
-
-
-
-
-class GeneratedSetPoints(Parameter):
-    """
-    A parameter that generates a setpoint array from start, stop and num points
-    parameters.
-    """
-    def __init__(self, startparam, stopparam, numpointsparam, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._startparam = startparam
-        self._stopparam = stopparam 
-        self._numpointsparam = numpointsparam
-
-    def get_raw(self):
-        return np.linspace(self._startparam(), self._stopparam() -1,
-                              self._numpointsparam())
-
-
-class IQ_INT(ParameterWithSetpoints):
-
-    def __init__(self, channel, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._channel = channel
-
-    def get_raw(self):
-        time.sleep(0.2)
-        data = self._instrument.get_data()
-        if self._channel == 'I1':
-            data_ret = data[0]
-        elif self._channel == 'Q1':
-            data_ret = data[1]
-        elif self._channel == 'I2':
-            data_ret = data[2]
-        else:
-            data_ret = data[3]
-        return data_ret
-
-
-class IQ_INT_all(Parameter):
-
-    def __init__(self, channel, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._channel = channel
-
-    def get_raw(self):
-        #time.sleep(0.2) ### test
-        data = self._instrument.get_data()
-        data_ret_I1 = np.array([data[0]])
-        data_ret_Q1 = np.array([data[1]])
-        data_ret_I2 = np.array([data[2]])
-        data_ret_Q2 = np.array([data[3]])
-        data_ret = np.concatenate((data_ret_I1,data_ret_Q1,data_ret_I2,data_ret_Q2)).T
-        return data_ret
-
-
-class IQ_INT_AVG(Parameter):
-
-    def __init__(self, channel, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._channel = channel
-
-    def get_raw(self):
-        time.sleep(0.2)
-        data = self._instrument.get_data()
-        if self._channel == 'I1':
-            data_ret = np.mean(data[0])
-        elif self._channel == 'Q1':
-            data_ret = np.mean(data[1])
-        elif self._channel == 'I2':
-            data_ret = np.mean(data[2])
-        else:
-            data_ret = np.mean(data[3])
-        return data_ret
-
-
-
-class IQ_INT_AVG_all(Parameter):
-
-    def __init__(self, channel, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._channel = channel
-
-    def get_raw(self):
-        time.sleep(0.2)
-        data = self._instrument.get_data()
-        data_ret_I1 = np.mean(data[0])
-        data_ret_Q1 = np.mean(data[1])
-        data_ret_I2 = np.mean(data[2])
-        data_ret_Q2 = np.mean(data[3])
-        return [data_ret_I1,data_ret_Q1,data_ret_I2,data_ret_Q2]
-
-
-
-class ADC_power(ParameterWithSetpoints):
-
-    def __init__(self, channel, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._channel = channel
-
-    def get_raw(self):
-        time.sleep(0.2)
-        data = self._instrument.get_data()
-        # data_ret_I1 = (np.mean(data[0]**2)-np.mean(data[0])**2)/50
-        # data_ret_Q1 = (np.mean(data[1]**2)-np.mean(data[1])**2)/50
-        # data_ret_I2 = (np.mean(data[2]**2)-np.mean(data[2])**2)/50
-        # data_ret_Q2 = (np.mean(data[3]**2)-np.mean(data[3])**2)/50
-        A_1 = (np.mean(data[0]**2 + data[1]**2))/50
-        A_2 = (np.mean(data[2]**2 + data[3]**2))/50
-        #data_ret_I1+data_ret_Q1,data_ret_I2+data_ret_Q2,
-        return np.array([ A_1, A_2])
-
-
-
-class IQ_CH1(ParameterWithSetpoints):
-
-    def __init__(self, channel, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._channel = channel
-
-    def get_raw(self):
-        time.sleep(0.2)
-        data = self._instrument.get_data()
-        if self._channel == 'I1':
-            data_ret = data[0]
-        elif self._channel == 'Q1':
-            data_ret = data[1]
-        else:
-            print('Wrong parameter.')
-        return data_ret
-
-
-
-class IQ_CH2(ParameterWithSetpoints):
-
-    def __init__(self, channel, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._channel = channel
-
-    def get_raw(self):
-        time.sleep(0.2)
-        data = self._instrument.get_data()
-        if self._channel == 'I2':
-            data_ret = data[0]
-        elif self._channel == 'Q2':
-            data_ret = data[1]
-        else:
-            print('Wrong parameter.')
-        return data_ret
-
-
-
-class ADC(Parameter):
-
-    def __init__(self, channel, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._channel = channel
-
-    def get_raw(self):
-        time.sleep(0.2)
-        data = self._instrument.get_data()
-        if self._channel == 'CH1':
-            data_ret = data[0]
-        elif self._channel == 'CH2':
-            data_ret = data[1]
-        else:
-            print('Wrong parameter.')
-        return data_ret
-
-
-
-
-class Redpitaya(VisaInstrument): 
-    """
-    QCoDeS driver for the Redpitaya
-    """
-    
-    # all instrument constructors should accept **kwargs and pass them on to
-    # super().__init__
+class Redpitaya(VisaInstrument):
     def __init__(self, name, address, **kwargs):
-        # supplying the terminator means you don't need to remove it from every response
         super().__init__(name, address, terminator='\r\n', **kwargs)
-
-        self.dummy_array_size_1 = 0
-        self.dummy_array_size_2 = 2
-        self.dummy_array_size_4 = 4
+        
+        # Connect to the Redpitaya board using the appropriate communication protocol
+        self._address = address
+        # Connect using TCP or USB
+        # For wireless connection use TCPIP::address::port::SOCKET
+        # For USB connection use ***
+        
+        # see https://redpitaya.readthedocs.io/en/latest/appsFeatures/remoteControl/remoteControl.html
+        # for more detail of the commands and of their limits
         
         
-        self.add_parameter( name = 'freq_filter',  
-                            #frequency of the low pass filter
-                            label = 'Low pass filter cut-off freq',
-                            vals = vals.Numbers(10e3,62.5e6),      
-                            unit   = 'Hz',
-                            set_cmd='FILTER:FREQ ' + '{:.12f}',
-                            get_cmd='FILTER:FREQ?',
-                            get_parser=float
-                            )
+        # analog outs
+        input_pin = [ 'AIN0', 'AIN1', 'AIN2', 'AIN3' ]
+        output_pin = [ 'AOUT0', 'AOUT1', 'AOUT2', 'AOUT3' ]
+        max_get_voltage = 3.3
+        max_set_voltage = 1.8
+        
+        for pin in (input_pin + output_pin):
+            # get the voltage for any of the analog pins
+            self.add_parameter( name='get_'+pin,
+                                label='Read input/output voltage on pin',
+                                vals=vals.Numbers(-max_get_voltage, max_get_voltage),
+                                unit='V',
+                                set_cmd=None,
+                                get_cmd='ANALOG:PIN? ' + pin,
+                                get_parser=float
+                                )        
+            
+        for pin in output_pin:
+            # set the voltage for the output pins
+            self.add_parameter( name='set_'+pin,
+                                label='Set output voltage on pin',
+                                vals=vals.Numbers(-max_set_voltage, max_set_voltage),
+                                unit='V',
+                                set_cmd='ANALOG:PIN ' + pin + ',' + '{:.12f}',
+                                get_cmd=None,
+                                )  
+            
+        # digital outputs
+        # In progress...
+            
+            
 
-        self.add_parameter( name = 'decimation_filter',
-                            # number of decimated points  
-                            label = 'Decimated points',
-                            # unit   = 'Hz',
-                            vals = vals.Numbers(10,65535),
-                            set_cmd='FILTER:DEC ' + '{:.12f}',
-                            get_cmd='FILTER:DEC?',
+        ## signal generators
+        min_frequency = 1
+        max_frequency = 50e6
+        max_voltage = 1
+        awg_array_size = 16384
+        
+        
+        # output generators
+        outputs = ['1', '2']
+        for out in outputs:
+            self.add_parameter( name='OUT' + out + '_status',
+                                label='Status of the generator 1',
+                                vals=vals.Enum('ON', 'OFF'),
+                                set_cmd='OUTPUT' + out + ':STATE ' + '{}',
+                                get_cmd='OUTPUT' + out + ':STATE?'
+                                )
+
+            self.add_parameter( name='OUT' + out + '_function',
+                                label='Output function of the generator',
+                                vals=vals.Enum('SINE', 'SQUARE', 'TRIANGLE', 'SAWU', 'SAWD', 'PWM', 'ARBITRARY', 'DC', 'DC_NEG'),
+                                set_cmd='SOUR' + out + ':FUNC ' + '{}',
+                                get_cmd='SOUR' + out + ':FUNC?'
+                                )        
+
+            self.add_parameter( name='OUT' + out + '_frequency',
+                                label='Frequency of the generator',
+                                vals=vals.Numbers(min_frequency, max_frequency),
+                                unit='Hz',
+                                set_cmd='SOUR' + out + ':FREQ:FIX ' + '{:.12f}',
+                                get_cmd='SOUR' + out + ':FREQ:FIX?',
+                                get_parser=float
+                                )
+
+            self.add_parameter( name='OUT' + out + '_phase',
+                                label='Phase of the generator',
+                                vals=vals.Numbers(-360, 360),
+                                unit='deg',
+                                set_cmd='SOUR' + out + ':PHAS  ' + '{:.12f}',
+                                get_cmd='SOUR' + out + ':PHAS?',
+                                get_parser=float
+                                )
+
+            self.add_parameter( name='OUT' + out + '_amplitude',
+                                label='Amplitude of the generator',
+                                vals=vals.Numbers(-max_voltage, max_voltage),
+                                unit='V',
+                                set_cmd='SOUR' + out + ':VOLT ' + '{:.12f}',
+                                get_cmd='SOUR' + out + ':VOLT?',
+                                get_parser=float
+                                )     
+
+            self.add_parameter( name='OUT' + out + '_offset',
+                                label='Amplitude offset of the generator',
+                                vals=vals.Numbers(-max_voltage, max_voltage),
+                                unit='V',
+                                set_cmd='SOUR' + out + ':VOLT:OFFS ' + '{:.12f}',
+                                get_cmd='SOUR' + out + ':VOLT:OFFS?',
+                                get_parser=float
+                                )  
+
+            self.add_parameter( name='OUT' + out + '_duty_cycle',
+                                label='Duty cycle of the generator',
+                                vals=vals.Numbers(0, 1),
+                                unit='',
+                                set_cmd='SOUR' + out + ':DCYC ' + '{:.12f}',
+                                get_cmd='SOUR' + out + ':DCYC?',
+                                get_parser=float
+                                )  
+
+            self.add_parameter( name='OUT' + out + '_awg',
+                                label='Arbitrary waveform for the output',
+                                vals=vals.Arrays(min_value=-max_voltage, max_value=max_voltage ,shape=(awg_array_size,)),
+                                unit='',
+                                set_cmd='SOUR' + out + ':TRAC:DATA:DATA ' + '{:.12f}',
+                                get_cmd='SOUR' + out + ':TRAC:DATA:DATA?',
+                                get_parser=str
+                                ) 
+
+            self.add_parameter( name='OUT' + out + '_type',
+                                label='Set output to pulsed or continuous',
+                                vals=vals.Enum('BURST', 'CONTINUOUS'),
+                                set_cmd='SOUR' + out + ':BURS:STAT ' + '{}',
+                                get_cmd='SOUR' + out + ':BURS:STAT?'
+                                )
+
+            self.add_parameter( name='OUT' + out + '_pulse_cycle',
+                                label='Set the number of periods in a pulse',
+                                vals=vals.Numbers(1, 50000),
+                                unit='',
+                                set_cmd='SOUR' + out + ':DCYC ' + '{:.12f}',
+                                get_cmd='SOUR' + out + ':DCYC?',
+                                get_parser=float
+                                )         
+
+            self.add_parameter( name='OUT' + out + '_pulse_repetition',
+                                label='Set the number of repeated pulses (65536 = inf)',
+                                vals=vals.Numbers(1, 65536),
+                                unit='',
+                                set_cmd='SOUR' + out + ':BURS:NOR ' + '{:.12f}',
+                                get_cmd='SOUR' + out + ':BURS:NOR?',
+                                get_parser=float
+                                ) 
+
+            self.add_parameter( name='OUT' + out + '_pulse_period',
+                                label='Set the duration of a single pulse in microseconds',
+                                vals=vals.Numbers(1, 500e6),
+                                unit='',
+                                set_cmd='SOUR' + out + ':BURS:INT:PER ' + '{:.12f}',
+                                get_cmd='SOUR' + out + ':BURS:INT:PER?',
+                                get_parser=float
+                                ) 
+
+            self.add_parameter( name='OUT' + out + '_trigger_source',
+                                label='Set the trigger source for the output',
+                                vals=vals.Enum('EXT_PE', 'EXT_NE', 'INT', 'GATED'),
+                                set_cmd='SOUR' + out + ':TRIG:SOUR ' + '{}',
+                                get_cmd='SOUR' + out + ':TRIG:SOUR?'
+                                )
+
+        
+        
+        ## acquisition
+        self.add_parameter( name='ADC_decimation',
+                            label='Set the decimation factor, each sample is the average of skipped samples if decimation > 1',
+                            vals=vals.Enum(1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536),
+                            unit='',
+                            set_cmd='ACQ:DEC ' + '{}',
+                            get_cmd='ACQ:DEC?',
                             get_parser=int
                             )
-
-        self.add_parameter( name = 'start_ADC',  
-                            # Starting point of the ADC aquisition in second
-                            label = 'Acquisition starting time',
-                            unit   = 's',
-                            vals = vals.Numbers(0,8191*8e-9),  #8192 is the maximum number of samples that can be generated (65 us)
-                            set_cmd='ADC:STARTPOS '  + '{}',
-                            get_cmd='ADC:STARTPOS?',
-                            set_parser = self.get_samples_from_sec,
-                            get_parser=self.get_sec_from_samples
+        
+        self.add_parameter( name='ADC_averaging',
+                            label='Enable/disable averaging',
+                            vals=vals.Enum('ON', 'OFF'),
+                            set_cmd='ACQ:AVG ' + '{}',
+                            get_cmd='ACQ:AVG?'
                             )
-
-        self.add_parameter( name = 'stop_ADC', 
-                            #stopping point of the aquisition 
-                            label = 'Acquisition stopping time',
-                            unit   = 's',
-                            vals = vals.Numbers(0,8191*8e-9),  #8192 is the maximum number of samples that can be generated (65 us)
-                            set_cmd='ADC:STOPPOS ' + '{:.12f}',
-                            get_cmd='ADC:STOPPOS?',
-                            set_parser = self.get_samples_from_sec,
-                            get_parser=self.get_sec_from_samples
+        
+        
+        # trigger
+        self.add_parameter( name='ADC_trigger',
+                            label='Disable triggering, trigger immediately or set trigger source and edge',
+                            vals=vals.Enum('DISABLED', 'NOW', 'CH1_PE', 'CH1_NE', 'CH2_PE', 'CH2_NE', 'EXT_PE', 'EXT_NE', 'AWG_PE', 'AWG_NE'),
+                            set_cmd='ACQ:TRIG ' + '{}',
+                            get_cmd='ACQ:TRIG:STAT?'
                             )
-
-        self.add_parameter( name = 'stop_DAC', 
-                            #stopping point of the LUT (Look-Up Table) 
-                            label = 'Stopping time of the LUT ',
-                            unit   = 's',
-                            vals = vals.Numbers(0,8192*8e-9),   #8192 is the maximum number of samples that can be generated (65 us)
-                            set_cmd='DAC:STOPPOS ' + '{:.12f}',
-                            get_cmd='DAC:STOPPOS?',
-                            set_parser = self.get_samples_from_sec,
-                            get_parser=self.get_sec_from_samples
+        
+        self.add_parameter( name='ADC_trigger_delay',
+                            label='Trigger delay (in units of samples)',
+                            vals=vals.Numbers(0, np.inf),
+                            set_cmd='ACQ:TRIG:DLY ' + '{}',
+                            get_cmd='ACQ:TRIG:DLY?'
                             )
-
-        self.add_parameter( name = 'period',  
-                            #period in second
-                            label = 'Period',
-                            unit  = 's',
-                            vals = vals.Numbers(0,1),
-                            set_cmd='PERIOD '+ '{}',
-                            get_cmd='PERIOD?',
-                            set_parser =self.get_samples_from_sec,
-                            get_parser=self.get_sec_from_samples
-                            )
-  
-        self.add_parameter( name = 'mode_output', 
-                            # Mode(string) : 
-                                        #'ADC': you get the rough uptput of the ADC: the entire trace
-                                        #'IQCH1', you get I and Q from channel 1
-                                        #'IQCH2', you get I and Q from channel 2
-                                        #'IQLP1' you get I and Q after the low pass filter
-                                        #'IQINT' you get I and Q after the integration
-                                        #we can use either IQLP1 or IQINT for the low pass filtering
-                            label = 'Output mode',
-                            vals = vals.Enum('ADC', 'IQCH1', 'IQCH2', 'IQLP1', 'IQINT'),
-                            set_cmd='OUTPUT:SELECT ' + '{}',
-                            get_cmd='OUTPUT:SELECT?'
-                            
-                            #get_parser=float
-                            )
-        # The get command doesn't work, not clear why
-        self.add_parameter( name = 'format_output', 
-                            #Format(string) : 'BIN' or 'ASCII' 
-                            label='Output format',
-                            vals = vals.Enum('ASCII','BIN'),
-                            set_cmd='OUTPUT:FORMAT ' + '{}',
-                            get_cmd='OUTPUT:FORMAT?',
-                            #snapshot_get  = False,
-                            get_parser=str
-                            )
-
-        self.add_parameter('nb_measure',
-                            set_cmd='{}',
-                            get_parser=int,)
-                            #initial_value = int(1) )
-
-
-######################################################################
-
-
-        self.add_parameter('status',
-                           set_cmd='{}',
-                           vals=vals.Enum('start', 'stop'),
-                           set_parser = self.set_mode)
-
-        self.add_parameter('data_size',
-                           get_cmd='OUTPUT:DATASIZE?')
-
-
-        self.add_parameter('data_output',
-         					#get_cmd='OUTPUT:DATA?'
-                            get_cmd = self.get_data)
-                            #get_cmd = self.get_single_pulse)
-
-        # self.add_parameter('data_output_raw',
-        #                      get_cmd='OUTPUT:DATA?')
-
-
-        self.add_parameter('pulse_zero',
-                            set_cmd='{}',
-                            #initial_value = int(0),
-                            get_parser =  int)
-
-        self.add_parameter('length_time', # total number of data points
-                            set_cmd='{}',
-                            get_parser =  int,)
-                            #initial_value = int(0))
-
-
-        self.add_parameter('pulse_axis',
-                            unit='trace index',
-                            label='Pulse-trace index axis',
-                            parameter_class=GeneratedSetPoints,
-                            startparam = self.pulse_zero,
-                            stopparam=self.nb_measure,
-                            numpointsparam=self.nb_measure,
-                            snapshot_value = False,
-                            vals=Arrays(shape=(self.nb_measure.get_latest,)))
-
-        self.add_parameter('channel_axis',
-                            unit = 'channel index',
-                            label = 'Channel index axis for ADC power mode',
-                            parameter_class = GeneratedSetPoints,
-                            startparam = self.int_0,
-                            stopparam = self.int_2,
-                            numpointsparam = self.int_2,
-                            snapshot_value = False,
-                            vals=Arrays(shape=(self.dummy_array_size_2,)))
-
-
-        self.add_parameter('time_axis',
-                            unit='s',
-                            label='Time',
-                            parameter_class=GeneratedSetPoints,
-                            startparam=self.pulse_zero,
-                            stopparam=self.length_time,#*8*1e-9,
-                            numpointsparam=self.length_time,
-                            snapshot_value = False,
-                            vals=Arrays(shape=(self.length_time.get_latest,)))#Maybe change the name to something understandable
+        
+        self.add_parameter( name='ADC_trigger_delay_ns',
+                            label='Trigger delay (in nanoseconds)',
+                            vals=vals.Numbers(0, np.inf),
+                            unit='ns',
+                            set_cmd='ACQ:TRIG:DLY:NS ' + '{:.12f}',
+                            get_cmd='ACQ:TRIG:DLY:NS?',
+                            get_parser=float 
+                            )        
+        
+        self.add_parameter( name='ADC_trigger_level',
+                            label='The trigger level in volts',
+                            vals=vals.Numbers(-np.inf, np.inf),
+                            unit='V',
+                            set_cmd='ACQ:TRIG:LEV ' + '{:.12f}',
+                            get_cmd='ACQ:TRIG:LEV?',
+                            get_parser=float 
+                            )       
 
         
-        # ADC1/2 calls the class ADC which returns the signal either in channel 1 or channel 2.
-        self.add_parameter('ADC1',
-                            unit='V',
-                            setpoints=(self.time_axis,),
-                            label='Channel 1',
-                            channel='CH1',
-                            parameter_class=ADC,
-                            vals=Arrays(shape=(self.length_time.get_latest,)))
-
-        self.add_parameter('ADC2',
-                            unit='V',
-                            setpoints=(self.time_axis,),
-                            label='Channel 2',
-                            channel='CH2',
-                            parameter_class=ADC,
-                            vals=Arrays(shape=(self.length_time.get_latest,)))
- 
-
-
-        #I1/Q1/I2/Q2 calls the class ADC which returns the I/Q signal either in channel 1 or channel 2.
-        self.add_parameter('I1',
-                            unit='V',
-                            setpoints=(self.time_axis,),
-                            label='Raw I1',
-                            channel='I1',
-                            parameter_class=IQ_CH1,
-                            vals=Arrays(shape=(self.length_time.get_latest,)))
-
-        self.add_parameter('Q1',
-                            unit='V',
-                            setpoints=(self.time_axis,),
-                            label='Raw Q1',
-                            channel='Q1',
-                            parameter_class=IQ_CH1,
-                            vals=Arrays(shape=(self.length_time.get_latest,)))
-
-        self.add_parameter('I2',
-                            unit='V',
-                            setpoints=(self.time_axis,),
-                            label='Raw I2',
-                            channel='I2',
-                            parameter_class=IQ_CH2,
-                            vals=Arrays(shape=(self.length_time.get_latest,)))
-
-        self.add_parameter('Q2',
-                            unit='V',
-                            setpoints=(self.time_axis,),
-                            label='Raw Q2',
-                            channel='Q2',
-                            parameter_class=IQ_CH2,
-                            vals=Arrays(shape=(self.length_time.get_latest,)))
-
-
-
-        #I1_INT/Q1_INT/I2_INT/Q2_INT calls the class ADC which returns the I_INT/Q_INT signal either in channel 1 or channel 2.
-
-        self.add_parameter('I1_INT',
-                            unit='V',
-                            setpoints=(self.pulse_axis,),
-                            label='Integrated I',
-                            channel='I1',
-                            parameter_class=IQ_INT,
-                            vals=Arrays(shape=(self.nb_measure.get_latest,)))
-
-        self.add_parameter('Q1_INT',
-                            unit='V',
-                            setpoints=(self.pulse_axis,),
-                            label='Integrated I',
-                            channel='Q1',
-                            parameter_class=IQ_INT,
-                            vals=Arrays(shape=(self.nb_measure.get_latest,)))
-
-        self.add_parameter('I2_INT',
-                            unit='V',
-                            setpoints=(self.pulse_axis,),
-                            label='Integrated I',
-                            channel='I2',
-                            parameter_class=IQ_INT,
-                            vals=Arrays(shape=(self.nb_measure.get_latest,)))
-
-        self.add_parameter('Q2_INT',
-                            unit='V',
-                            setpoints=(self.pulse_axis,),
-                            label='Integrated I',
-                            channel='Q2',
-                            parameter_class=IQ_INT,
-                            vals=Arrays(shape=(self.nb_measure.get_latest,)))
-
-        self.add_parameter('IQ_INT_all',
-                            unit='V',
-                            label='Integrated I Q for both ADC',
-                            channel='all_IQ',
-                            parameter_class=IQ_INT_all,
-                            vals=Arrays(shape=(tuple([self.nb_measure.get_latest,self.dummy_array_size_4]),)))
-
-        ###########################We perform the average over the number of repeated traces
-
-        self.add_parameter('I1_INT_AVG',
-                            unit='V',
-                            # setpoints=(self.nb_measure,),
-                            label='Integrated averaged I',
-                            channel='I1',
-                            parameter_class=IQ_INT_AVG,
-                            #snapshot_get  = False,
-                            vals=Arrays(shape=(self.dummy_array_size_1,)))
-
-        self.add_parameter('Q1_INT_AVG',
-                            unit='V',
-                            label='Integrated averaged Q',
-                            channel='Q1',
-                            parameter_class=IQ_INT_AVG,
-                            #snapshot_get  = False,
-                            vals=Arrays(shape=(self.dummy_array_size_1,)))
-
-        self.add_parameter('I2_INT_AVG',
-                            unit='V',
-                            label='Integrated averaged I',
-                            channel='I2',
-                            parameter_class=IQ_INT_AVG,
-                            #snapshot_get  = False,
-                            vals=Arrays(shape=(self.dummy_array_size_1,)))
-
-        self.add_parameter('Q2_INT_AVG',
-                            unit='V',
-                            label='Integrated averaged Q',
-                            channel='Q2',
-                            parameter_class=IQ_INT_AVG,
-                            #snapshot_get  = False,
-                            vals=Arrays(shape=(self.dummy_array_size_1,)))
-
-        self.add_parameter('IQ_INT_AVG_all',
-                            unit='V',
-                            label='Integrated averaged I Q for both ADC',
-                            channel='all_IQ',
-                            parameter_class=IQ_INT_AVG_all,
-                            #snapshot_get  = False,
-                            vals=Arrays(shape=(self.dummy_array_size_4,)))
-
-        self.add_parameter('ADC_power',
-                            unit='W',
-                            setpoints=(self.channel_axis,),
-                            label='Integrated averaged power at both ADC',
-                            channel='SpectrumAnalyzer',
-                            parameter_class=ADC_power,
-                            #snapshot_get  = False,
-                            vals=Arrays(shape=(self.dummy_array_size_2,)))
-
-        #It's a useful parameter to check the "ERR!" type errors.
-        self.add_parameter('RESET',
-                            get_cmd=self.reset)
-
-
+        # data pointers
+        self.add_parameter( name='ADC_trigger_pointer',
+                            label='Returns the position where the trigger event happened',
+                            set_cmd=None,
+                            get_cmd='ACQ:TPOS?'
+                            )
+        
+        self.add_parameter( name='ADC_write_pointer',
+                            label='Returns the current position of the write pointer',
+                            set_cmd=None,
+                            get_cmd='ACQ:WPOS?'
+                            )
+    
+    
+    
+        ## inputs parameters
+        # data
+        buffer_size = 2**14
+        
+        self.add_parameter( name='ADC_data_units',
+                            label='Select units in which the acquired data will be returned',
+                            vals=vals.Enum('RAW', 'VOLTS'),
+                            set_cmd='ACQ:DATA:UNITS ' + '{}',
+                            get_cmd='ACQ:DATA:UNITS?'
+                            )
+        
+        self.add_parameter( name='ADC_data_format',
+                            label='Select formats in which the acquired data will be returned',
+                            vals=vals.Enum('BIN', 'ASCII'),
+                            set_cmd='ACQ:DATA:FORMAT ' + '{}',
+                            get_cmd=None
+                            )
+        
+        self.add_parameter( name='ADC_buffer_size',
+                            label='Returns the buffer size',
+                            get_cmd='ACQ:BUF:SIZE?'
+                            )
+        
+        inputs = ['1', '2']
+        for inp in inputs:
+            self.add_parameter( name='IN' + inp + '_gain',
+                                label='Set the gain to HIGH or LOW, which refers to jumper settings on the fast analog inputs',
+                                vals=vals.Enum('HV', 'LV'),
+                                set_cmd='ACQ:SOUR' + inp + ':GAIN ' + '{}',
+                                get_cmd='ACQ:SOUR' + inp + ':GAIN?'
+                                )
+            
+            self.add_parameter( name='IN' + inp + '_read_buffer',
+                                label='Read the full buffer',
+                                get_cmd='ACQ:SOUR' + inp + ':DATA?'
+                                )
+        
+        
         # good idea to call connect_message at the end of your constructor.
         # this calls the 'IDN' parameter that the base Instrument class creates 
         # for every instrument  which serves two purposes:
         # 1) verifies that you are connected to the instrument
         # 2) gets the ID info so it will be included with metadata snapshots later.
-        self.connect_message()    
-
-# ----------------------------------------------------- Methods -------------------------------------------------- #
-
-#---------------------------------------------------------------------From seconds to samples and viceversa------
-
-    def get_samples_from_sec(self, sec):
-        samples=sec/8.0e-9
-        samples=int(round(samples))
-        time.sleep(0.1)
-        return samples
+        self.connect_message() 
         
-    def get_sec_from_samples(self, samples):
-        sec=float(samples)*8.0e-9
-        time.sleep(0.1)
-        return sec
+        
+    # functions
 
-#-------------------------------------------------------------Setting parameters
-    def set_mode(self, mode):
-        time.sleep(0.2)
-        return mode
-
-#------------------------------------------------------------Reset data output
     def reset(self):
-        return self.ask('OUTPUT:DATA?')
+        # Reset both the outputs
+        self.write('GEN:RST')
+        
+        
+    def ADC_start(self):
+        # Start the acquisition
+        self.write('ACQ:START')
+        
+    def ADC_stop(self):
+        # Stop the acquisition
+        self.write('ACQ:RST')
+        
+    def ADC_reset(self):
+        # Stops the acquisition and sets all parameters to default values
+        self.write('ACQ:START')
+        
+        
+    def align_channels_phase(self):
+        # Align the phase of the outputs
+        self.write('PHAS:ALIGN')
 
+    def trigger_channels(self):
+        # Triggers immediately both the channels
+        self.write('SOUR:TRIG:INT')
 
-#-------------------------------------------------------------------Look-Up-Table (LUT) menagement ---------
+    def CH1_trigger(self):
+        # Triggers immediately channel 1
+        self.write('SOUR1:TRIG:INT')
 
-    def fill_LUT(self, function, parameters): 
-        """
-        Fill a LUT  
-        Input:
-                function(string): name of the function
-                parameters(float): vector of parameters characterizing the function:
-                freq (Hz), Amplitude (from 0 to 1), pulse_duration (s), delay (s)
-        Output: 
-                the table (int) 
-        """
-        if function == 'SIN': 
-            freq, Amplitude, pulse_duration, delay = parameters
-            if freq > 1./8e-9 or Amplitude > 1 or pulse_duration + delay >  8e-9*8192: 
-                raise ValueError('One of the parameters is not correct in the sin LUT')
-            else: 
-                N_point = int(round(pulse_duration/8e-9))
-                n_oscillation = freq*pulse_duration
-                Amp_bit = Amplitude*8192                           ######### the DAC is 14 bit 8192 . The maximum aplitude will be (2^14)/2
-                t = np.linspace(0, 2 * np.pi,N_point)
-                return Amp_bit*np.concatenate((np.zeros(int(round(delay/8e-9))), np.sin(n_oscillation*t)))
-
-        elif function == 'COS': 
-            freq, Amplitude, pulse_duration, delay = parameters
-            if freq > 1./8e-9 or Amplitude > 1 or pulse_duration + delay > 8e-9*8192: 
-                raise ValueError('One of the parameters is not correct in the cos LUT')
-            else: 
-                N_point = int(round(pulse_duration/8e-9))
-                n_oscillation = freq*pulse_duration
-                
-                Amp_bit = Amplitude*8192
-                t = np.linspace(0,2*np.pi,N_point)
-                return Amp_bit*np.concatenate((np.zeros(int(round(delay/8e-9))), np.cos(n_oscillation*t)))
-
-        elif function == 'RAMSEY':
-
-            freq, Amplitude, pulse_duration, t_wait, delay = parameters
-            if freq > 1. / 8e-9 or Amplitude > 1 or 2*pulse_duration + delay + t_wait > 8e-9 * 8192:
-                raise ValueError('One of the parameters is not correct is the Ramsey LUT')
-            else :
-                N_point = int(round(pulse_duration/8e-9))
-                n_oscillation = freq * pulse_duration
-                Amp_bit = Amplitude * 8192
-                t = np.linspace(0, 2 * np.pi, N_point)
-                wait_vec = np.zeros(int(round(t_wait/8e-9)))
-                delay_vec = np.zeros(int(round(delay/8e-9)))
-                excitation_vec = np.sin(n_oscillation*t)
-                return Amp_bit*np.concatenate((delay_vec,excitation_vec,wait_vec,excitation_vec))
-
-        elif function == 'ECHO':
-            freq, Amplitude, pulse_pi_2, t_wait, delay = parameters
-            if freq > 1. / 8e-9 or Amplitude > 1 or 4*pulse_pi_2 + delay + 2*t_wait > 8e-9 * 8192:
-                raise ValueError('One of the parameters is not correct is the Echo LUT')
-            else:
-                N_point_pi_2 = int(round(pulse_pi_2/8e-9))
-                N_point_pi = 2 * N_point_pi_2
-
-                n_oscillation_pi_2 = freq * pulse_pi_2
-                n_oscillation_pi = 2 * n_oscillation_pi_2
-
-                Amp_bit = Amplitude * 8192
-                t_pi_2 = np.linspace(0, 2 * np.pi, N_point_pi_2)
-                t_pi = np.linspace(0, 2 * np.pi, N_point_pi)
-
-                wait_vec = np.zeros(int(round(t_wait/8e-9)))
-                delay_vec = np.zeros(int(round(delay/8e-9)))
-
-                pi_2_vec = np.sin(n_oscillation_pi_2*t_pi_2)
-                pi_vec = np.sin(n_oscillation_pi * t_pi)
-
-                return Amp_bit*np.concatenate((delay_vec, pi_2_vec, wait_vec, pi_vec, wait_vec, pi_2_vec))
-                
-        elif function == 'STEP': 
-            Amplitude, pulse_duration,t_slope,delay = parameters
-            if Amplitude > 1 or pulse_duration + delay + 2*t_slope > 8e-9 * 8192: 
-                raise ValueError('One of the parameters is not correct is the STEP LUT')
-            
-            Amp_bit = Amplitude*8192
-            N_point = int(pulse_duration/8e-9)
-            N_slope = int(t_slope/8e-9)
-            N_delay = int(delay/8e-9)
-            
-
-            delay_vec = np.zeros(N_delay)
-            slope_vec = np.linspace(0,1,N_slope)
-            pulse_vec = np.ones(N_point)
-            
-            return Amp_bit*np.concatenate((delay_vec,slope_vec,pulse_vec,slope_vec[::-1]))
-              
-        else: 
-            raise ValueError('This function is undefined')
-
-    def send_DAC_LUT(self, table, channel, trigger = 'NONE'): 
-        """
-        Send a LUT to one of the DAC channels 
-        Input: 
-            - table (float): table to be sent 
-            - channel(string): channel to which the table is sent 
-            - trigger(string): send a trigger to the channels or not  
-        Output: 
-            None
-        """
-        self.log.info(__name__+ ' Send the DAC LUT \n')
-        if trigger == 'NONE': 
-            table_bit = table.astype(int) * 4  
-        elif trigger == 'CH1': 
-            table_bit = table.astype(int) * 4 + 1
-        elif trigger == 'CH2': 
-            table_bit = table.astype(int) * 4 + 2
-        elif trigger == 'BOTH': 
-            table_bit = table.astype(int) * 4 + 3
-        else: 
-            raise ValueError('Wrong trigger value')     
-
-        table_bit = table_bit.astype(str)
-        separator = ', '
-        table_bit = separator.join(table_bit)
-        if channel in ['CH1', 'CH2']: 
-            time.sleep(0.1)
-            #print(table_bit)
-            self.write('DAC:' + channel + ' ' + table_bit)
-        else: 
-            raise ValueError('Wrong channel value')
-                
-    def send_IQ_LUT(self, table, channel, quadrature): 
-        """
-        Send a LUT to one of the IQ channel  (I and Q will be multiplied by the ADC input)
-        Input: 
-            - table (float): table to be sent 
-            - channel(string): channel in which to table in sent 
-            - trigger(string): send a trigger in channels or not 
-
-        """
-        self.log.info(__name__+ ' Send the IQ LUT \n')
-        table_bit = table.astype(int) * 4 
-        table_bit = table_bit.astype(str)
-        separator = ', '
-        table_bit = separator.join(table_bit)
-        if quadrature in ['I', 'Q'] and channel in ['CH1', 'CH2']:
-            time.sleep(0.1)
-            self.write(quadrature + ':' + channel + ' ' + table_bit)
-        else: 
-            raise ValueError('Wrong quadrature or channel')
-
-    def reset_LUT(self,time = 8192*8e-9): 
-        """
-        Reset all the LUT 
-        Input: 
-            time(float): duration of the table to be reset in second. 
-            Default value is the all table 
-        Output: 
-            None
-        """
-        self.log.info(__name__+' Reset the DAC LUT \n')
-        parameters = [0, 0, time,0]
-        empty_table = self.fill_LUT('SIN',parameters)
-        self.stop_DAC(time)
-        self.send_DAC_LUT(empty_table,'CH1')
-        self.send_DAC_LUT(empty_table,'CH2')
-        self.send_IQ_LUT(empty_table,'CH1','I')
-        self.send_IQ_LUT(empty_table,'CH1','Q')
-        self.send_IQ_LUT(empty_table,'CH2','I')
-        self.send_IQ_LUT(empty_table,'CH2','Q')
-
-#--------------------------------------------------------------------------Output Data----
-
-    def get_data(self):
-        time.sleep(0.2)
-        t = 0 
-        nb_measure = self.nb_measure()
-        mode = self.mode_output()
-        N_single_trace = int(round(self.stop_ADC()/8e-9))-int(round(self.start_ADC()/8e-9))
-        #print(1,t)
-        # print(nb_measure, 'traces.', 'Mode:',mode)
-        self.format_output('ASCII')
-        self.status('start')
-        time.sleep(0.2) # Timer to change if no time to start ; changed from 2
-        signal = np.array([], dtype ='int32')
-        t0 = time.time()
-
-        while t < nb_measure:
-            try:
-                # time.sleep(0.0) ***testing
-                rep = self.ask('OUTPUT:DATA?')
-                #print(rep)
-                #rep = self.data_output_raw()
-                if rep[1] == '}':
-                    print('Warning: fast polling')
-                elif rep[1] != '0' or len(rep)<=2:  
-                    print ('Memory problem %s' %rep[1])
-                    #print(2,t)
-                    #time.sleep(0.2)
-                    self.status('stop')
-                    #print(3,t)
-                    #time.sleep(0.2)
-                    self.status('start')
-                else: 
-                    # signal.append( rep[3:-1] + ',')
-                    rep = eval( '[' + rep[3:-1] + ']' ) ### it creates an array of the data removing just the first one
-                    signal = np.concatenate((signal,rep))
-                    tick = np.bitwise_and(rep,3) # extraction du debut de l'aquisition: LSB = 3
-                    t += len(np.where(tick[1:] - tick[:-1])[0])+1 # idex of the tick   
-                    #print(t)
-                    t1 = time.time()
-                    #print (t1 - t0, t)
-                    t0 = t1
-            except: 
-                t=t
-        time.sleep(0.1)
-        self.status('stop')
-        #time.sleep(1)
-        time.sleep(0.1)
-        trash = self.ask('OUTPUT:DATA?')
-        #time.sleep(1)
-        #print(mode)
-        if t > nb_measure: 
-            #print(t, nb_measure)
-            #print(tick)
-            jump_tick = np.where(tick[1:] - tick[:-1])[0]
-            #print(jump_tick)
-            if len(jump_tick)==1:
-                len_data_block = jump_tick[0]+1
-            else:
-                len_data_block = jump_tick[1] - jump_tick[0]
-
-            signal = signal[:nb_measure*len_data_block]
-            
-        if (mode == 'ADC' or mode == 'IQCH1' or mode == 'IQCH2'):
-            #print(12)
-            data_1 = signal[::2]/(4*8192.)
-            data_2 = signal[1::2]/(4*8192.)
-            return data_1, data_2
-        else: # mode IQint and IQLP1
-            ICH1 = signal[::4]/(4*8192.)/N_single_trace#(self.length_time()/self.nb_measure()) # it staRT FROM 0 AND TAKE A POINT EVERY 4 
-            QCH1 = signal[1::4]/(4*8192.)/N_single_trace#(self.length_time()/self.nb_measure()) # it staART FROM 1 AND TAKE A POINT EVERY 4
-            ICH2 = signal[2::4]/(4*8192.)/N_single_trace#(self.length_time()/self.nb_measure())
-            QCH2 = signal[3::4]/(4*8192.)/N_single_trace#(self.length_time()/self.nb_measure())
-            return ICH1, QCH1, ICH2, QCH2
-            
-    def get_single_pulse(self):
-        #self.mode_output(mode)
-        self.format_output('ASCII')
-        self.status('start')
-        signal = np.array([], dtype ='int32')
-
-        #Some sleep needed otherwise the data acquisition is too fast.
-        time.sleep(0.8)
-        rep = self.ask('OUTPUT:DATA?')
-        if rep[1] != '0' or len(rep)<=2:
-            print ('Memory problem %s' %rep[1])
-            #print(2,t)
-            self.status('stop')
-            #print(3,t)
-            self.status('start')
-        else: 
-            # signal.append( rep[3:-1] + ',')
-            rep = eval( '[' + rep[3:-1] + ']' )
-            signal = np.concatenate((signal,rep))
-            tick = np.bitwise_and(rep,3) # extraction du debut de l'aquisition: LSB = 3
-        self.status('stop')
-        jump_tick = np.where(tick[1:] - tick[:-1])[0]
-        len_data_block = jump_tick[1] - jump_tick[0]
-        signal = signal[:len_data_block]
-
-        print(self.mode_output())
-
-        if self.mode_output() == ('ADC' or 'IQCH1' or 'IQCH2'):
-            #print(self.mode_output())
-            data_1 = signal[::2]/(4*8192.)
-            data_2 = signal[1::2]/(4*8192.)
-            return data_1, data_2
-        else: 
-            ICH1 = signal[::4]/(4*8192.)
-            QCH1 = signal[1::4]/(4*8192.)
-            ICH2 = signal[2::4]/(4*8192.)
-            QCH2 = signal[3::4]/(4*8192.)
-            return ICH1, QCH1, ICH2, QCH2
-
-    def get_data_binary(self, mode, nb_measure):
-
-        t = 0 
-        self.set_mode_output(mode)
-        self.set_format_output('BIN')
-        self.start()
-        signal = np.array([], dtype='int32')
-        t0 = time.time()
-        while t < nb_measure:
-            try:
-                rep = self.data_output_bin()
-                if rep[0] != 0:
-                    print ('Memory problem %s' %rep[0])
-                    self.stop()
-                    self.start()
-                else: 
-                    signal = np.concatenate((signal,rep[1:]))
-                    if mode == ('ADC' or 'IQCH1' or 'IQCH2'): 
-                        t = len(signal)/2
-                    else: 
-                        t = len(signal)/4
-                t1 = time.time()
-                print (t1 - t0, t)
-                t0 = t1
-            except: 
-                t=t
-
-
-        self.stop()
-        trash = self.data_output()
-            
-        if mode == ('ADC' or 'IQCH1' or 'IQCH2'):
-            data_1 = signal[::2][:nb_measure]/(4*8192.)
-            data_2 = signal[1::2][:nb_measure]/(4*8192.)
-            return data_1, data_2
-
-        else:
-            ICH1 = signal[::4][:nb_measure]/(4*8192.)
-            QCH1 = signal[1::4][:nb_measure]/(4*8192.)
-            ICH2 = signal[2::4][:nb_measure]/(4*8192.)
-            QCH2 = signal[3::4][:nb_measure]/(4*8192.)
-            return ICH1, QCH1, ICH2, QCH2     
+    def CH2_trigger(self):
+        # Triggers immediately channel 2
+        self.write('SOUR2:TRIG:INT')
+        
+        
+        
+    # helpers
+        
+    def format_output_status(self, status_in):
+        # to return ON and OFF when asked for the status of outputs
+        if status_in == '0': 
+            status_out = 'OFF'
+        elif status_in == '1': 
+            status_out = 'ON'
+        
+        return status_out
     
-
-
-
-
-    def int_0(self):
-        return 0
-
-    def int_2(self):
-        return 2
-
-
-
-    # def data_size(self):
-    #     """
-    #         Ask for the data size
-    #     """ 
-    #     #sleep(0.1)
-    #     self.log.info(__name__ + ' Ask for the data size \n')
-    #     #self.query('OUTPUT:DATASIZE?')
-    #     self.write('OUTPUT:DATASIZE?')
-
-        
-    # def data_output(self):
-    #     """
-    #         Ask for the output data 
-    #         Input:
-    #             None
-    #         Output: 
-    #             - data: table of ASCII 
-    #     """
-    #     #sleep(0.2)
-    #     self.log.info(__name__ + ' Ask for the output data \n')
-    #     #data = self.query('OUTPUT:DATA?')
-    #     data = self.write('OUTPUT:DATA?')
-    #     return data
-
-
-    # def get_data(self, mode, nb_measure):
-    #     t = 0 
-    #     self.mode_output(mode)
-    #     self.format_output('ASCII')
-    #     #self.start()
-    #     self.status('start')
-    #     signal = np.array([], dtype ='int32')
-    #     t0 = time.time()
-
-    #     while t < nb_measure:
-    #         try:
-    #             #time.sleep(0.1)
-    #             rep = self.data_output()
-    #             if rep[1] != '0' or len(rep)<=2:
-    #                 print ('Memory problem %s' %rep[1])
-    #                 self.status('stop')
-    #                 self.status('start')
-    #             else: 
-    #                 # signal.append( rep[3:-1] + ',')
-    #                 rep = eval( '[' + rep[3:-1] + ']' )
-    #                 signal = np.concatenate((signal,rep))
-    #                 tick = np.bitwise_and(rep,3) # extraction du debut de l'aquisition: LSB = 3
-    #                 t += len(np.where(tick[1:] - tick[:-1])[0])+1 # idex of the tick   
-    #                 # print t 
-    #                 t1 = time.time()
-    #                 print (t1 - t0, t)
-    #                 t0 = t1
-    #         except: 
-    #             t=t
-    #     #self.stop()
-    #     self.status('stop')
-            
-    #     trash = self.data_output()
-    #     # except: 
-    #         # 'no trash'
-    #     # i = 0 
-    #     # while i==0: 
-    #         # try: 
-    #             # qt.msleep(0.25)
-    #             # trash = self.data_output()
-    #             # i = i +len(trash)
-    #         # except: 
-    #             # i = 0
-
-
-    #     if t > nb_measure: 
-    #         jump_tick = np.where(tick[1:] - tick[:-1])[0]
-    #         len_data_block = jump_tick[1] - jump_tick[0]
-    #         signal = signal[:nb_measure*len_data_block]
-            
-    #     if mode == ('ADC' or 'IQCH1' or 'IQCH2'):
-    #         data_1 = signal[::2]/(4*8192.)
-    #         data_2 = signal[1::2]/(4*8192.)
-    #         print('OK')
-    #         return data_1, data_2
-    #     else: 
-    #         ICH1 = signal[::4]/(4*8192.)
-    #         QCH1 = signal[1::4]/(4*8192.)
-    #         ICH2 = signal[2::4]/(4*8192.)
-    #         QCH2 = signal[3::4]/(4*8192.)
-    #         return ICH1, QCH1, ICH2, QCH2
-
-    
-    
-        
-        
-        
         
