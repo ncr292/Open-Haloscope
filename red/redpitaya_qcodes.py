@@ -1,3 +1,50 @@
+# -*- coding: utf-8 -*-
+# This is a Qcodes driver for Redpitaya board written for the Alca Haloscope project
+# Written by Nicolò Crescini taking inspiration from another version by Arpit Ranadive and Martina Esposito
+
+import time
+import numpy as np
+
+from qcodes import validators as vals
+from qcodes.instrument import ( Instrument,
+                                InstrumentChannel,
+                                InstrumentModule,
+                                ManualParameter,
+                                MultiParameter,
+                                VisaInstrument,
+                                )
+
+from qcodes.instrument.parameter import ParameterWithSetpoints, Parameter
+
+
+
+
+class GeneratedSetPoints(Parameter):
+    # A parameter that generates a setpoint array from start, stop and num points parameters.
+
+    def __init__(self, start_param, stop_param, num_points_param, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._start_param = start_param
+        self._stop_param = stop_param 
+        self._num_points_param = num_points_param
+
+    def get_raw(self):
+        return np.linspace(self._start_param(), self._stop_param() -1, self._num_points_param())
+
+
+
+class IN1_out(ParameterWithSetpoints):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def get_raw(self):
+        npoints = self.root_instrument.waveform_points.get_latest()
+        return np.random.rand(npoints)
+
+        
+
+
 class Redpitaya(VisaInstrument):
     def __init__(self, name, address, **kwargs):
         super().__init__(name, address, terminator='\r\n', **kwargs)
@@ -6,8 +53,8 @@ class Redpitaya(VisaInstrument):
         self._address = address
         # Connect using TCP or USB
         # For wireless connection use TCPIP::address::port::SOCKET
-        # For USB connection use ***
-        
+        # For USB connection use ***to be tested***
+
         # see https://redpitaya.readthedocs.io/en/latest/appsFeatures/remoteControl/remoteControl.html
         # for more detail of the commands and of their limits
         
@@ -162,7 +209,6 @@ class Redpitaya(VisaInstrument):
                                 set_cmd='SOUR' + out + ':TRIG:SOUR ' + '{}',
                                 get_cmd='SOUR' + out + ':TRIG:SOUR?'
                                 )
-
         
         
         ## acquisition
@@ -234,7 +280,6 @@ class Redpitaya(VisaInstrument):
     
         ## inputs parameters
         # data
-        buffer_size = 2**14
         
         self.add_parameter( name='ADC_data_units',
                             label='Select units in which the acquired data will be returned',
@@ -268,6 +313,54 @@ class Redpitaya(VisaInstrument):
                                 label='Read the full buffer',
                                 get_cmd='ACQ:SOUR' + inp + ':DATA?'
                                 )
+
+
+        # length of the acquired time trace
+        self.add_parameter( 'waveform_length',
+                            initial_value=100e-3,
+                            unit='s',
+                            label='Waveform length',
+                            # the minimum value is 1e-6s which gives 125 points
+                            vals=vals.Numbers(1e-6,np.inf),
+                            set_cmd=None,
+                            get_cmd=None
+                            )
+
+        self.add_parameter( 'sampling_frequency',
+                            initial_value=125000000.0,
+                            set_cmd=None,
+                            get_cmd=None
+                            )
+
+        self.add_parameter( 'waveform_points',
+                            unit='',
+                            initial_value=int(self.waveform_length() * self.sampling_frequency()),
+                            vals=vals.Numbers(1, np.inf),
+                            get_cmd=None,
+                            set_cmd=None,
+                            get_parser=int
+                            )
+            
+        ## time axis
+        self.add_parameter( 'time_axis',
+                            unit='s',
+                            label='Time axis',
+                            parameter_class=GeneratedSetPoints,
+                            start_param = 0,
+                            stop_param=self.waveform_length,
+                            num_points_param=self.waveform_points,
+                            snapshot_value=False,
+                            vals=vals.Arrays(shape=(self.waveform_points.get_latest,))
+                            )
+
+        ## measured waveform
+        self.add_parameter( 'IN1_waveform',
+                            unit='V',
+                            setpoints=(self.time_axis,),
+                            label='Input 1 waveform',
+                            parameter_class=IN1_out,
+                            vals=vals.Arrays(shape=(self.waveform_points.get_latest,))
+                            )
         
         
         # good idea to call connect_message at the end of your constructor.
@@ -313,7 +406,8 @@ class Redpitaya(VisaInstrument):
     def CH2_trigger(self):
         # Triggers immediately channel 2
         self.write('SOUR2:TRIG:INT')
-        
+
+
         
         
     # helpers
@@ -326,5 +420,16 @@ class Redpitaya(VisaInstrument):
             status_out = 'ON'
         
         return status_out
-    
-        
+
+
+    def get_number_of_points(self):
+        FS = self.sampling_frequency
+        acquisition_length = self.acquisition_length()
+        decimation = self.ADC_decimation()
+
+        #try:
+        number_of_points = FS * acquisition_length / decimation
+        #except:
+        #    raise ValueError('The acquisition length is not defined or too close to 1/FS.')
+
+        return number_of_points
