@@ -17,6 +17,14 @@ from qcodes.instrument import ( Instrument,
 from qcodes.instrument.parameter import ParameterWithSetpoints, Parameter
 
 
+"""
+DEVELOPMENT NOTES
+- the decimation, as defined in IN1_out, is acquired at the import and does not update if changed.
+  This needs to be fixed as now to use the decimation, one needs to set it and reimport the driver.
+
+
+"""
+
 
 
 class GeneratedSetPoints(Parameter):
@@ -34,13 +42,26 @@ class GeneratedSetPoints(Parameter):
 
 
 class IN1_out(ParameterWithSetpoints):
+    # Formats and outputs the raw data acquired by the Redpitaya
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     def get_raw(self):
-        npoints = self.root_instrument.waveform_points.get_latest()
-        return np.random.rand(npoints)
+        duration = self._instrument.waveform_length()
+        sampling_frequency = self._instrument.sampling_frequency()
+        decimation = self._instrument.ADC_decimation()
+        raw_data = self._instrument.get_countinuous_data(1, duration)
+
+        number_of_points = int( duration * sampling_frequency // decimation )
+
+        try:
+            data_string = np.array( raw_data[1:-1].split(',') )
+            data = data_string.astype(float)
+        except:
+            raise NameError(raw_data)
+        
+        return data[:number_of_points]
 
         
 
@@ -54,6 +75,10 @@ class Redpitaya(VisaInstrument):
         # Connect using TCP or USB
         # For wireless connection use TCPIP::address::port::SOCKET
         # For USB connection use ***to be tested***
+
+        # Sampling frequency
+        self.FS = 125000000.0
+        self.BUFFER_SIZE = 2**14
 
         # see https://redpitaya.readthedocs.io/en/latest/appsFeatures/remoteControl/remoteControl.html
         # for more detail of the commands and of their limits
@@ -88,16 +113,14 @@ class Redpitaya(VisaInstrument):
             
         # digital outputs
         # In progress...
-            
-            
 
+            
         ## signal generators
         min_frequency = 1
         max_frequency = 50e6
         max_voltage = 1
         awg_array_size = 16384
-        
-        
+
         # output generators
         outputs = ['1', '2']
         for out in outputs:
@@ -267,13 +290,15 @@ class Redpitaya(VisaInstrument):
         self.add_parameter( name='ADC_trigger_pointer',
                             label='Returns the position where the trigger event happened',
                             set_cmd=None,
-                            get_cmd='ACQ:TPOS?'
+                            get_cmd='ACQ:TPOS?',
+                            get_parser=int
                             )
         
         self.add_parameter( name='ADC_write_pointer',
                             label='Returns the current position of the write pointer',
                             set_cmd=None,
-                            get_cmd='ACQ:WPOS?'
+                            get_cmd='ACQ:WPOS?',
+                            get_parser=int
                             )
     
     
@@ -317,7 +342,7 @@ class Redpitaya(VisaInstrument):
 
         # length of the acquired time trace
         self.add_parameter( 'waveform_length',
-                            initial_value=100e-3,
+                            initial_value=1e-3,
                             unit='s',
                             label='Waveform length',
                             # the minimum value is 1e-6s which gives 125 points
@@ -327,14 +352,14 @@ class Redpitaya(VisaInstrument):
                             )
 
         self.add_parameter( 'sampling_frequency',
-                            initial_value=125000000.0,
+                            initial_value=self.FS,
                             set_cmd=None,
                             get_cmd=None
                             )
 
         self.add_parameter( 'waveform_points',
                             unit='',
-                            initial_value=int(self.waveform_length() * self.sampling_frequency()),
+                            initial_value=int(self.waveform_length() * self.sampling_frequency() / self.ADC_decimation()),
                             vals=vals.Numbers(1, np.inf),
                             get_cmd=None,
                             set_cmd=None,
@@ -377,19 +402,109 @@ class Redpitaya(VisaInstrument):
         # Reset both the outputs
         self.write('GEN:RST')
         
-        
     def ADC_start(self):
         # Start the acquisition
         self.write('ACQ:START')
         
     def ADC_stop(self):
         # Stop the acquisition
-        self.write('ACQ:RST')
+        self.write('ACQ:STOP')
         
     def ADC_reset(self):
         # Stops the acquisition and sets all parameters to default values
-        self.write('ACQ:START')
+        self.write('ACQ:RST')
+
+
+    def ADC_read_NfromA(self, channel, size: int, pointer: int):
+        # read N samples from the buffer of the Redpitaya starting from the pointer
+        scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:STA:N? ' + str(pointer) + ',' + str(size)
         
+        raw_data = self.ask(scpi_string)
+        try:
+            data_string = np.array( raw_data[1:-1].split(',') )
+            data = data_string.astype(float)
+        except:
+            raise NameError(raw_data)
+
+        return data
+
+    def ADC_read_NfromA_raw(self, channel, size: int, pointer: int):
+        # read N samples from the buffer of the Redpitaya starting from the pointer
+        scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:STA:N? ' + str(pointer) + ',' + str(size)
+        raw_data = self.ask(scpi_string)
+
+        return raw_data
+
+
+    # for some reasons it does not work
+    def ADC_read_AtoB(self, channel, pointer_A: int, pointer_B: int):
+        # read B-A samples from the buffer of the Redpitaya starting from pointer A
+        scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:STA:END? ' + str(pointer_A) + ',' + str(pointer_B)
+        print(scpi_string)
+        raw_data = self.ask(scpi_string)
+        try:
+            data_string = np.array( raw_data[1:-1].split(',') )
+            data = data_string.astype(float)
+        except:
+            raise NameError(raw_data)
+
+        return data
+
+
+    def ADC_read_N_after_trigger(self, channel, size: int):
+        # read N samples from the buffer of the Redpitaya starting from the trigger
+        scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:OLD:N? ' + str(size)
+        
+        raw_data = self.ask(scpi_string)
+        try:
+            data_string = np.array( raw_data[1:-1].split(',') )
+            data = data_string.astype(float)
+        except:
+            raise NameError(raw_data)
+
+        return data
+
+    def ADC_read_N_after_trigger_raw(self, channel, size: int):
+        # read N samples from the buffer of the Redpitaya starting from the trigger
+        scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:OLD:N? ' + str(size)
+        raw_data = self.ask(scpi_string)
+
+        return raw_data
+
+
+    def ADC_read_N_before_trigger(self, channel, size: int):
+        # read N samples from the buffer of the Redpitaya before the trigger
+        scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:LAT:N? ' + str(size)
+        
+        raw_data = self.ask(scpi_string)
+        try:
+            data_string = np.array( raw_data[1:-1].split(',') )
+            data = data_string.astype(float)
+        except:
+            raise NameError(raw_data)
+
+        return data
+
+
+    def get_countinuous_data(self, channel, duration):
+    #This is the core part of the measurement, with a defined measurement length it
+    # keeps reading and emptying the Redpitaya buffer, concatenating the waveforms.
+
+        DEC = self.ADC_decimation()
+        BLOCK = self.BUFFER_SIZE
+        NPOINTS = int( duration * self.FS // DEC )
+        print(NPOINTS)
+
+        t = 0
+        data = ''
+
+        while t < NPOINTS:
+            data += self.ADC_read_N_after_trigger_raw(channel, BLOCK)[1:-1] + ','
+            t += BLOCK
+
+        return data
+
+
         
     def align_channels_phase(self):
         # Align the phase of the outputs
@@ -408,6 +523,7 @@ class Redpitaya(VisaInstrument):
         self.write('SOUR2:TRIG:INT')
 
 
+
         
         
     # helpers
@@ -420,16 +536,3 @@ class Redpitaya(VisaInstrument):
             status_out = 'ON'
         
         return status_out
-
-
-    def get_number_of_points(self):
-        FS = self.sampling_frequency
-        acquisition_length = self.acquisition_length()
-        decimation = self.ADC_decimation()
-
-        #try:
-        number_of_points = FS * acquisition_length / decimation
-        #except:
-        #    raise ValueError('The acquisition length is not defined or too close to 1/FS.')
-
-        return number_of_points
