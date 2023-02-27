@@ -493,12 +493,20 @@ class Redpitaya(VisaInstrument):
         DEC = self.ADC_decimation()
         BLOCK = self.BUFFER_SIZE
         NPOINTS = int( duration * self.FS // DEC )
-        print(NPOINTS)
+        #print(NPOINTS)
 
         t = 0
         data = ''
 
+        """
+        Ci sono ancora diversi problemi.
+        L'acquisizione continua funziona, ma sfasa i pacchetti di dati perché sono presi un po'
+        a cazzo. Per com'è ora il canale viene triggerato e il buffer svuotato ad ogni passo del
+        ciclo while, quindi dopo un tempo a caso in pratica.
+        """
+
         while t < NPOINTS:
+            self.trigger_channels()
             data += self.ADC_read_N_after_trigger_raw(channel, BLOCK)[1:-1] + ','
             t += BLOCK
 
