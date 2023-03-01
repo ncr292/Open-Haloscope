@@ -1410,7 +1410,7 @@ class AxionElectron():
         Had_u = 5e-3
         Had_l = 1.5e-4
 
-        # QCD Axion models
+        # QCD Axion modelsf
         n = 200
         m = logspace(log10(m_min),log10(m_max),n)
         rot = 45.0
