@@ -55,7 +55,7 @@ class OHAxion():
         return b_a * g_invert / np.sqrt(c.hbar)
 
 
-    # plot the DFSZ model
+    # plot the DFSZ model, inspired from the code of Ciaran O'Hare
     def plot_DFSZ_axion(self, mass):
         ## QCD Axion band:
         DFSZ_u = self.DFSZ_u
@@ -128,3 +128,12 @@ class OHUtils():
     def eV_to_Hz(m):
         f = m * c.e / c.hbar  / (2 * c.pi)
         return f
+
+
+
+
+
+
+
+
+        
