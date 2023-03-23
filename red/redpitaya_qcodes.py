@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-# This is a Qcodes driver for Redpitaya board written for the Alca Haloscope project
-# Written by Nicolò Crescini taking inspiration from another version by Arpit Ranadive and Martina Esposito
+# This is a Qcodes driver for Redpitaya board written for the Alca Haloscope project.
+# Written by Nicolò Crescini taking inspiration from a version by Arpit Ranadive and Martina Esposito.
 
 import time
 import numpy as np
+from tqdm import tqdm
 
 from qcodes import validators as vals
 from qcodes.instrument import ( Instrument,
@@ -41,29 +42,57 @@ class GeneratedSetPoints(Parameter):
 
 
 
-class IN1_out(ParameterWithSetpoints):
+class IN1_data(ParameterWithSetpoints):
     # Formats and outputs the raw data acquired by the Redpitaya
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     def get_raw(self):
-        duration = self._instrument.waveform_length()
+        duration = self._instrument.acquisition_length()
         sampling_frequency = self._instrument.sampling_frequency()
         decimation = self._instrument.ADC_decimation()
-        raw_data = self._instrument.get_countinuous_data(1, duration)
+        points = self._instrument.waveform_points()
 
-        number_of_points = int( duration * sampling_frequency // decimation )
+        # acquire data from channel 1
+        raw_data = self._instrument.get_data(1, duration)
 
         try:
             data_string = np.array( raw_data[1:-1].split(',') )
-            data = data_string.astype(float)
+            data_line = data_string.astype(float)
+            data = data_line.reshape(self._instrument.BUFFER_SIZE, self._instrument.number_of_waveforms())
+            
         except:
             raise NameError(raw_data)
         
-        return data[:number_of_points]
+        return data
 
+
+class IN2_data(ParameterWithSetpoints):
+    # Formats and outputs the raw data acquired by the Redpitaya
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def get_raw(self):
+        duration = self._instrument.acquisition_length()
+        sampling_frequency = self._instrument.sampling_frequency()
+        decimation = self._instrument.ADC_decimation()
+        points = self._instrument.waveform_points()
+
+        # acquire data from channel 2
+        raw_data = self._instrument.get_data(2, duration)
+
+        try:
+            data_string = np.array( raw_data[1:-1].split(',') )
+            data_line = data_string.astype(float)
+            #print(self._instrument.BUFFER_SIZE, self._instrument.number_of_waveforms())
+            data = data_line.reshape(self._instrument.BUFFER_SIZE, self._instrument.number_of_waveforms())
+        except:
+            raise NameError(raw_data)
         
+        return data
+
 
 
 class Redpitaya(VisaInstrument):
@@ -78,6 +107,7 @@ class Redpitaya(VisaInstrument):
 
         # Sampling frequency
         self.FS = 125000000.0
+        # Buffer size
         self.BUFFER_SIZE = 2**14
 
         # see https://redpitaya.readthedocs.io/en/latest/appsFeatures/remoteControl/remoteControl.html
@@ -305,7 +335,6 @@ class Redpitaya(VisaInstrument):
     
         ## inputs parameters
         # data
-        
         self.add_parameter( name='ADC_data_units',
                             label='Select units in which the acquired data will be returned',
                             vals=vals.Enum('RAW', 'VOLTS'),
@@ -339,16 +368,9 @@ class Redpitaya(VisaInstrument):
                                 get_cmd='ACQ:SOUR' + inp + ':DATA?'
                                 )
 
-
-        # length of the acquired time trace
-        self.add_parameter( 'waveform_length',
-                            initial_value=1e-3,
-                            unit='s',
-                            label='Waveform length',
-                            # the minimum value is 1e-6s which gives 125 points
-                            vals=vals.Numbers(1e-6,np.inf),
-                            set_cmd=None,
-                            get_cmd=None
+        self.add_parameter( name='ADC_output',
+                            label='Returns the output',
+                            get_cmd=self.get_output
                             )
 
         self.add_parameter( 'sampling_frequency',
@@ -357,15 +379,50 @@ class Redpitaya(VisaInstrument):
                             get_cmd=None
                             )
 
+
+        ## Parameters for a run data acquisition
+        # length of the acquisition
+        
+        self.add_parameter( 'acquisition_length',
+                            initial_value=1,
+                            unit='s',
+                            label='Length of the acquisition',
+                            # the minimum value is 1e-6s which gives 125 points
+                            vals=vals.Numbers(1e-6, np.inf),
+                            set_cmd=None,
+                            get_cmd=None
+                            )
+
+        # number of points in a single waveform
         self.add_parameter( 'waveform_points',
                             unit='',
-                            initial_value=int(self.waveform_length() * self.sampling_frequency() / self.ADC_decimation()),
+                            initial_value=int(self.BUFFER_SIZE),
                             vals=vals.Numbers(1, np.inf),
                             get_cmd=None,
                             set_cmd=None,
                             get_parser=int
                             )
-            
+
+        # duration of a single waveform
+        self.add_parameter( 'waveform_length',
+                            unit='s',
+                            initial_value=float(self.BUFFER_SIZE * self.ADC_decimation() / self.FS),
+                            vals=vals.Numbers(0, np.inf),
+                            get_cmd=None,
+                            set_cmd=None,
+                            get_parser=float
+                            )
+
+        # number of waveforms in the run
+        self.add_parameter( 'number_of_waveforms',
+                            unit='',
+                            initial_value=0,
+                            vals=vals.Numbers(0, np.inf),
+                            get_cmd=None,
+                            set_cmd=None,
+                            get_parser=int
+                            )
+
         ## time axis
         self.add_parameter( 'time_axis',
                             unit='s',
@@ -378,13 +435,34 @@ class Redpitaya(VisaInstrument):
                             vals=vals.Arrays(shape=(self.waveform_points.get_latest,))
                             )
 
-        ## measured waveform
-        self.add_parameter( 'IN1_waveform',
+        ## multiple waveforms axis
+        self.add_parameter( 'waveform_axis',
+                            unit='',
+                            label='Waveform number',
+                            parameter_class=GeneratedSetPoints,
+                            start_param = 0,
+                            stop_param=self.number_of_waveforms,
+                            num_points_param=self.number_of_waveforms,
+                            snapshot_value=False,
+                            vals=vals.Arrays(shape=(self.number_of_waveforms.get_latest,))
+                            )
+
+        ## measured waveform 1
+        self.add_parameter( 'IN1',
                             unit='V',
-                            setpoints=(self.time_axis,),
-                            label='Input 1 waveform',
-                            parameter_class=IN1_out,
-                            vals=vals.Arrays(shape=(self.waveform_points.get_latest,))
+                            setpoints=(self.time_axis,self.waveform_axis),
+                            label='Input 1',
+                            parameter_class=IN1_data,
+                            vals=vals.Arrays(shape=(self.waveform_points.get_latest,self.number_of_waveforms.get_latest,))
+                            )
+
+        ## measured waveform 2
+        self.add_parameter( 'IN2',
+                            unit='V',
+                            setpoints=(self.time_axis,self.waveform_axis),
+                            label='Input 2',
+                            parameter_class=IN2_data,
+                            vals=vals.Arrays(shape=(self.waveform_points.get_latest,self.number_of_waveforms.get_latest,))
                             )
         
         
@@ -396,11 +474,36 @@ class Redpitaya(VisaInstrument):
         self.connect_message() 
         
         
-    # functions
+    ## functions
+    # signal generators
+
+    def align_channels_phase(self):
+        # Align the phase of the outputs
+        self.write('PHAS:ALIGN')
+
+    def OUT_trigger(self):
+        # Triggers immediately both the outputs
+        self.write('SOUR:TRIG:INT')
+
+    def OUT_reset(self):
+        # Reset both the outputs
+        self.write('GEN:RST')
+
+    def OUT1_trigger(self):
+        # Triggers immediately channel 1
+        self.write('SOUR1:TRIG:INT')
+
+    def OUT2_trigger(self):
+        # Triggers immediately channel 2
+        self.write('SOUR2:TRIG:INT')
 
     def reset(self):
         # Reset both the outputs
         self.write('GEN:RST')
+
+
+    ## acquisition
+    # analog-to-digital converter
         
     def ADC_start(self):
         # Start the acquisition
@@ -414,8 +517,12 @@ class Redpitaya(VisaInstrument):
         # Stops the acquisition and sets all parameters to default values
         self.write('ACQ:RST')
 
+    def get_output(self):
+        # Returns the output, which is useful to check for 'ERR!' messages
+        return self.ask('OUTPUT:DATA?')
 
-    def ADC_read_NfromA(self, channel, size: int, pointer: int):
+
+    def ADC_read_N_from_A(self, channel, size: int, pointer: int):
         # read N samples from the buffer of the Redpitaya starting from the pointer
         scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:STA:N? ' + str(pointer) + ',' + str(size)
         
@@ -428,7 +535,8 @@ class Redpitaya(VisaInstrument):
 
         return data
 
-    def ADC_read_NfromA_raw(self, channel, size: int, pointer: int):
+
+    def ADC_read_N_from_A_raw(self, channel, size: int, pointer: int):
         # read N samples from the buffer of the Redpitaya starting from the pointer
         scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:STA:N? ' + str(pointer) + ',' + str(size)
         raw_data = self.ask(scpi_string)
@@ -437,7 +545,7 @@ class Redpitaya(VisaInstrument):
 
 
     # for some reasons it does not work
-    def ADC_read_AtoB(self, channel, pointer_A: int, pointer_B: int):
+    def ADC_read_A_to_B(self, channel, pointer_A: int, pointer_B: int):
         # read B-A samples from the buffer of the Redpitaya starting from pointer A
         scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:STA:END? ' + str(pointer_A) + ',' + str(pointer_B)
         print(scpi_string)
@@ -464,6 +572,7 @@ class Redpitaya(VisaInstrument):
 
         return data
 
+
     def ADC_read_N_after_trigger_raw(self, channel, size: int):
         # read N samples from the buffer of the Redpitaya starting from the trigger
         scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:OLD:N? ' + str(size)
@@ -486,55 +595,61 @@ class Redpitaya(VisaInstrument):
         return data
 
 
-    def get_countinuous_data(self, channel, duration):
-    #This is the core part of the measurement, with a defined measurement length it
+    # composite acquisition functions
+
+    def get_data(self, channel, duration):
+    # This is the core part of the measurement, with a defined measurement length it
     # keeps reading and emptying the Redpitaya buffer, concatenating the waveforms.
 
         DEC = self.ADC_decimation()
         BLOCK = self.BUFFER_SIZE
-        NPOINTS = int( duration * self.FS // DEC )
-        #print(NPOINTS)
+        self.ADC_data_format('ASCII')
 
-        t = 0
+        # empty the buffer
+        #self.get_output()
+
+        t = 0.0
+        index = 0
         data = ''
 
         """
         Ci sono ancora diversi problemi.
-        L'acquisizione continua funziona, ma sfasa i pacchetti di dati perché sono presi un po'
-        a cazzo. Per com'è ora il canale viene triggerato e il buffer svuotato ad ogni passo del
-        ciclo while, quindi dopo un tempo a caso in pratica.
+        Ad esempio il duty cycle fa schifo.
         """
 
-        while t < NPOINTS:
-            self.trigger_channels()
+        self.ADC_start()
+        time.sleep(0.2)
+
+        t0 = time.time()
+        self.ADC_write_pointer(0)
+        pbar = tqdm(total=100)
+
+        while t < duration:
+            index += 1
+
+            # trigger the ADC and refill the buffer
+            self.ADC_write_pointer(0)
+            self.ADC_trigger('NOW')
+
+            # read all the data
             data += self.ADC_read_N_after_trigger_raw(channel, BLOCK)[1:-1] + ','
-            t += BLOCK
+            self.number_of_waveforms(index)
+            self.ADC_write_pointer(0)
+
+            # update the time which passed from the beginning of the run
+            t = time.time() - t0
+            pbar.update(int(100 * t / duration - pbar.n))
+
+        pbar.close()
+        time.sleep(0.2)
+        self.ADC_stop()
 
         return data
 
-
-        
-    def align_channels_phase(self):
-        # Align the phase of the outputs
-        self.write('PHAS:ALIGN')
-
-    def trigger_channels(self):
-        # Triggers immediately both the channels
-        self.write('SOUR:TRIG:INT')
-
-    def CH1_trigger(self):
-        # Triggers immediately channel 1
-        self.write('SOUR1:TRIG:INT')
-
-    def CH2_trigger(self):
-        # Triggers immediately channel 2
-        self.write('SOUR2:TRIG:INT')
-
-
-
         
         
-    # helpers
+
+    ## helpers
         
     def format_output_status(self, status_in):
         # to return ON and OFF when asked for the status of outputs
