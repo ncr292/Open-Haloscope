@@ -3,6 +3,8 @@
 # Written by Nicolò Crescini taking inspiration from a version by Arpit Ranadive and Martina Esposito.
 
 import time
+import binascii
+
 import numpy as np
 from tqdm import tqdm
 
@@ -41,7 +43,6 @@ class GeneratedSetPoints(Parameter):
         return np.linspace(self._start_param(), self._stop_param() -1, self._num_points_param())
 
 
-
 class IN1_data(ParameterWithSetpoints):
     # Formats and outputs the raw data acquired by the Redpitaya
 
@@ -55,13 +56,11 @@ class IN1_data(ParameterWithSetpoints):
         points = self._instrument.waveform_points()
 
         # acquire data from channel 1
-        raw_data = self._instrument.get_data(1, duration)
+        raw_data = self._instrument.get_data(1, duration, data_type='BIN')
 
         try:
-            data_string = np.array( raw_data[1:-1].split(',') )
-            data_line = data_string.astype(float)
-            data = data_line.reshape(self._instrument.BUFFER_SIZE, self._instrument.number_of_waveforms())
-            
+            data = np.reshape(raw_data, (self._instrument.number_of_waveforms(), 
+                                         self._instrument.BUFFER_SIZE))
         except:
             raise NameError(raw_data)
         
@@ -81,13 +80,11 @@ class IN2_data(ParameterWithSetpoints):
         points = self._instrument.waveform_points()
 
         # acquire data from channel 2
-        raw_data = self._instrument.get_data(2, duration)
+        raw_data = self._instrument.get_data(2, duration, data_type='BIN')
 
         try:
-            data_string = np.array( raw_data[1:-1].split(',') )
-            data_line = data_string.astype(float)
-            #print(self._instrument.BUFFER_SIZE, self._instrument.number_of_waveforms())
-            data = data_line.reshape(self._instrument.BUFFER_SIZE, self._instrument.number_of_waveforms())
+            data = np.reshape(raw_data, (self._instrument.number_of_waveforms(), 
+                                         self._instrument.BUFFER_SIZE))
         except:
             raise NameError(raw_data)
         
@@ -96,6 +93,7 @@ class IN2_data(ParameterWithSetpoints):
 
 
 class Redpitaya(VisaInstrument):
+    ## main driver
     def __init__(self, name, address, **kwargs):
         super().__init__(name, address, terminator='\r\n', **kwargs)
         
@@ -447,22 +445,29 @@ class Redpitaya(VisaInstrument):
                             vals=vals.Arrays(shape=(self.number_of_waveforms.get_latest,))
                             )
 
+        self.add_parameter( 'duty_cycle',
+                            initial_value=self.estimated_duty_cycle(),
+                            set_cmd=None,
+                            get_cmd=self.estimated_duty_cycle
+                            )
+
+
         ## measured waveform 1
         self.add_parameter( 'IN1',
                             unit='V',
-                            setpoints=(self.time_axis,self.waveform_axis),
+                            setpoints=(self.waveform_axis,self.time_axis),
                             label='Input 1',
                             parameter_class=IN1_data,
-                            vals=vals.Arrays(shape=(self.waveform_points.get_latest,self.number_of_waveforms.get_latest,))
+                            vals=vals.Arrays(shape=(self.number_of_waveforms.get_latest,self.waveform_points.get_latest,))
                             )
 
         ## measured waveform 2
         self.add_parameter( 'IN2',
                             unit='V',
-                            setpoints=(self.time_axis,self.waveform_axis),
+                            setpoints=(self.waveform_axis,self.time_axis),
                             label='Input 2',
                             parameter_class=IN2_data,
-                            vals=vals.Arrays(shape=(self.waveform_points.get_latest,self.number_of_waveforms.get_latest,))
+                            vals=vals.Arrays(shape=(self.number_of_waveforms.get_latest,self.waveform_points.get_latest,))
                             )
         
         
@@ -524,129 +529,150 @@ class Redpitaya(VisaInstrument):
 
     def ADC_read_N_from_A(self, channel, size: int, pointer: int):
         # read N samples from the buffer of the Redpitaya starting from the pointer
-        scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:STA:N? ' + str(pointer) + ',' + str(size)
-        
-        raw_data = self.ask(scpi_string)
-        try:
-            data_string = np.array( raw_data[1:-1].split(',') )
-            data = data_string.astype(float)
-        except:
-            raise NameError(raw_data)
 
-        return data
-
-
-    def ADC_read_N_from_A_raw(self, channel, size: int, pointer: int):
-        # read N samples from the buffer of the Redpitaya starting from the pointer
         scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:STA:N? ' + str(pointer) + ',' + str(size)
         raw_data = self.ask(scpi_string)
 
         return raw_data
 
-
-    # for some reasons it does not work
     def ADC_read_A_to_B(self, channel, pointer_A: int, pointer_B: int):
         # read B-A samples from the buffer of the Redpitaya starting from pointer A
+
         scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:STA:END? ' + str(pointer_A) + ',' + str(pointer_B)
-        print(scpi_string)
         raw_data = self.ask(scpi_string)
-        try:
-            data_string = np.array( raw_data[1:-1].split(',') )
-            data = data_string.astype(float)
-        except:
-            raise NameError(raw_data)
 
-        return data
-
+        return raw_data
 
     def ADC_read_N_after_trigger(self, channel, size: int):
         # read N samples from the buffer of the Redpitaya starting from the trigger
         scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:OLD:N? ' + str(size)
-        
         raw_data = self.ask(scpi_string)
-        try:
-            data_string = np.array( raw_data[1:-1].split(',') )
-            data = data_string.astype(float)
-        except:
-            raise NameError(raw_data)
 
-        return data
+        return raw_data
 
+    def ADC_read_N_after_trigger_bin(self, channel, size: int):
+        # read N binary samples from the buffer of the Redpitaya starting from the trigger
 
-    def ADC_read_N_after_trigger_raw(self, channel, size: int):
-        # read N samples from the buffer of the Redpitaya starting from the trigger
         scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:OLD:N? ' + str(size)
+        raw_data = self.visa_handle.query_binary_values( scpi_string, 
+                                                         datatype='f', 
+                                                         is_big_endian=True,
+                                                         expect_termination=False, 
+                                                         data_points=self.BUFFER_SIZE,
+                                                         container=np.ndarray
+                                                         )
+
+        return raw_data
+
+    def ADC_read_N_before_trigger(self, channel, size: int):
+        # read N samples from the buffer of the Redpitaya before the trigger
+
+        scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:LAT:N? ' + str(size)
         raw_data = self.ask(scpi_string)
 
         return raw_data
 
 
-    def ADC_read_N_before_trigger(self, channel, size: int):
-        # read N samples from the buffer of the Redpitaya before the trigger
-        scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:LAT:N? ' + str(size)
-        
-        raw_data = self.ask(scpi_string)
-        try:
-            data_string = np.array( raw_data[1:-1].split(',') )
-            data = data_string.astype(float)
-        except:
-            raise NameError(raw_data)
-
-        return data
-
-
     # composite acquisition functions
 
-    def get_data(self, channel, duration):
+    def get_data(self, channel, duration, data_type='ASCII'):
     # This is the core part of the measurement, with a defined measurement length it
     # keeps reading and emptying the Redpitaya buffer, concatenating the waveforms.
 
         DEC = self.ADC_decimation()
         BLOCK = self.BUFFER_SIZE
-        self.ADC_data_format('ASCII')
-
-        # empty the buffer
-        #self.get_output()
+        self.ADC_data_format(data_type)
 
         t = 0.0
         index = 0
-        data = ''
 
         """
         Ci sono ancora diversi problemi.
         Ad esempio il duty cycle fa schifo.
         """
 
-        self.ADC_start()
-        time.sleep(0.2)
+        if data_type == 'ASCII':    
+            # One can choose the data format to be used
+            # ascii is immediately readable but slow
+            data = ''
 
-        t0 = time.time()
-        self.ADC_write_pointer(0)
-        pbar = tqdm(total=100)
+            self.ADC_start()
+            time.sleep(0.2)
 
-        while t < duration:
-            index += 1
-
-            # trigger the ADC and refill the buffer
+            t0 = time.time()
             self.ADC_write_pointer(0)
-            self.ADC_trigger('NOW')
+            pbar = tqdm(total=100)
 
-            # read all the data
-            data += self.ADC_read_N_after_trigger_raw(channel, BLOCK)[1:-1] + ','
-            self.number_of_waveforms(index)
+            while t < duration:
+                index += 1
+
+                # trigger the ADC and refill the buffer
+                self.ADC_write_pointer(0)
+                self.ADC_trigger('NOW')
+
+                # read all the data
+                data += self.ADC_read_N_after_trigger(channel, BLOCK)[1:-1] + ','
+
+                self.number_of_waveforms(index)
+                self.ADC_write_pointer(0)
+
+                # update the time which passed from the beginning of the run
+                t = time.time() - t0
+                pbar.update(int(100 * t / duration - pbar.n))
+
+            pbar.close()
+            time.sleep(0.2)
+            self.ADC_stop()
+
+            data_string = np.array( data[1:-1].split(',') )
+            data_line = data_string.astype(float)
+
+            return data_line    
+
+
+        elif data_type == 'BIN':
+            # One can choose the data format to be used
+            # binary is fast, using it improves the duty cycle
+            data = np.array([])
+
+            self.ADC_start()
+            time.sleep(0.2)
+
+            t0 = time.time()
             self.ADC_write_pointer(0)
+            pbar = tqdm(total=100)
 
-            # update the time which passed from the beginning of the run
-            t = time.time() - t0
-            pbar.update(int(100 * t / duration - pbar.n))
+            while t < duration:
+                index += 1
 
-        pbar.close()
-        time.sleep(0.2)
-        self.ADC_stop()
+                # trigger the ADC and refill the buffer
+                self.ADC_write_pointer(0)
+                self.ADC_trigger('NOW')
 
-        return data
+                # read all the data
+                new_waveform = self.ADC_read_N_after_trigger_bin(channel, BLOCK)
+                data = np.append(data, new_waveform)
+                #print(data)
+                
+                self.number_of_waveforms(index)
+                self.ADC_write_pointer(0)
 
-        
+                # update the time which passed from the beginning of the run
+                t = time.time() - t0
+                pbar.update(int(100 * t / duration - pbar.n))
+
+            pbar.close()
+            time.sleep(0.2)
+            self.ADC_stop()
+
+            # go back to ascii at the end
+            self.ADC_data_format('ASCII')
+
+            return data
+
+        else:
+            raise NameError('Format must be BIN or ASCII')
+
         
 
     ## helpers
@@ -659,3 +685,8 @@ class Redpitaya(VisaInstrument):
             status_out = 'ON'
         
         return status_out
+
+    def estimated_duty_cycle(self):
+        duty_cycle = self.number_of_waveforms() * (self.BUFFER_SIZE / self.FS * self.ADC_decimation())
+
+        return duty_cycle
