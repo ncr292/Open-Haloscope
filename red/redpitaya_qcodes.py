@@ -6,6 +6,7 @@ import time
 import binascii
 
 import numpy as np
+from scipy.signal import periodogram
 from tqdm import tqdm
 
 from qcodes import validators as vals
@@ -22,10 +23,9 @@ from qcodes.instrument.parameter import ParameterWithSetpoints, Parameter
 
 """
 DEVELOPMENT NOTES
-- the decimation, as defined in IN1_out, is acquired at the import and does not update if changed.
-  This needs to be fixed as now to use the decimation, one needs to set it and reimport the driver.
-
-
+- 
+- 
+- 
 """
 
 
@@ -91,6 +91,44 @@ class IN2_data(ParameterWithSetpoints):
         return data
 
 
+class VNA1_trace(ParameterWithSetpoints):
+    ## Formats and outputs the raw data acquired by the Redpitaya
+    # Note: one needs to set the decimation before using the VNA, so to use a 
+    # large decimation for the low frequency traces and viceversa.
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def get_raw(self):
+        start_frequency = self._instrument.vna_start()
+        stop_frequency = self._instrument.vna_stop()
+        number_of_points = self._instrument.vna_points()
+        number_of_averages = self._instrument.vna_averages()
+
+        # initalise the trace array
+        frequency = np.linspace(start_frequency, stop_frequency, number_of_points)
+        trace = np.zeros(number_of_points)
+
+        # first turn on the ADC and the sources
+        self._instrument.ADC_data_format('BIN')
+        self._instrument.ADC_start()
+
+        self._instrument.OUT_trigger()
+        self._instrument.OUT1_status('ON')
+
+        # then measure the points from channel 1
+        for avg in range(number_of_averages):
+            for point in tqdm(range(number_of_points)):
+                trace[point] += self._instrument.spectrscopy(1, frequency[point])
+
+        trace = trace / number_of_averages
+
+        # eventually turn off the ADC and the sources
+        self._instrument.ADC_stop()
+        self._instrument.OUT1_status('OFF')
+        
+        return 10 * np.log10(trace)
+
 
 class Redpitaya(VisaInstrument):
     ## main driver
@@ -99,9 +137,9 @@ class Redpitaya(VisaInstrument):
         
         # Connect to the Redpitaya board using the appropriate communication protocol
         self._address = address
-        # Connect using TCP or USB
-        # For wireless connection use TCPIP::address::port::SOCKET
-        # For USB connection use ***to be tested***
+        # Connect using wireless or ethernet
+        # For wireless or ethernet connection use TCPIP::address::port::SOCKET
+        # 
 
         # Sampling frequency
         self.FS = 125000000.0
@@ -120,7 +158,7 @@ class Redpitaya(VisaInstrument):
         
         for pin in (input_pin + output_pin):
             # get the voltage for any of the analog pins
-            self.add_parameter( name='get_'+pin,
+            self.add_parameter( name='get_' + pin,
                                 label='Read input/output voltage on pin',
                                 vals=vals.Numbers(-max_get_voltage, max_get_voltage),
                                 unit='V',
@@ -131,7 +169,7 @@ class Redpitaya(VisaInstrument):
             
         for pin in output_pin:
             # set the voltage for the output pins
-            self.add_parameter( name='set_'+pin,
+            self.add_parameter( name='set_'  +pin,
                                 label='Set output voltage on pin',
                                 vals=vals.Numbers(-max_set_voltage, max_set_voltage),
                                 unit='V',
@@ -139,15 +177,77 @@ class Redpitaya(VisaInstrument):
                                 get_cmd=None,
                                 )  
             
-        # digital outputs
-        # In progress...
+        # UART in/out
+        # handling parameters
+
+        """
+        Still not working, the communication does not communicate.
+        """
+        self.add_parameter( name='UART_bits',
+                            label='Sets the character size in bits.',
+                            vals=vals.Enum('CS6', 'CS7', 'CS8'),
+                            unit='',
+                            set_cmd='UART:BITS ' + '{}',
+                            get_cmd='UART:BITS?'
+                            )
+
+        self.add_parameter( name='UART_speed',
+                            label='Speed of the UART connection.',
+                            vals=vals.Enum(1200,2400,4800,9600,19200,38400,57600,115200,230400,576000,921000,1000000,1152000,1500000,2000000,2500000,3000000,3500000,4000000),
+                            unit='',
+                            set_cmd='UART:SPEED ' + '{}',
+                            get_cmd='UART:SPEED?'
+                            )
+
+        self.add_parameter( name='UART_stop_bit',
+                            label='Length of the stop bit.',
+                            vals=vals.Enum('STOP1', 'STOP2'),
+                            unit='',
+                            set_cmd='UART:STOPB ' + '{}',
+                            get_cmd='UART:STOPB?'
+                            )
+
+        self.add_parameter( name='UART_parity',
+                            label='Sets parity check mode.',
+                            vals=vals.Enum('NONE', 'EVEN', 'ODD', 'MARK', 'SPACE'),
+                            unit='',
+                            set_cmd='UART:PARITY ' + '{}',
+                            get_cmd='UART:PARITY?'
+                            )
+
+        self.add_parameter( name='UART_timeout',
+                            label='Sets the timeout.',
+                            vals=vals.Numbers(0,255),
+                            unit='',
+                            set_cmd='UART:TIMEOUT ' + '{}',
+                            get_cmd='UART:TIMEOUT?',
+                            get_parser = int
+                            )
+
+        self.add_parameter( name='UART_data_length',
+                            vals=vals.Numbers(0,255),
+                            unit='',
+                            initial_value=1,
+                            set_cmd=None,
+                            get_cmd=None,
+                            get_parser = int            
+                            )
+
+        self.add_parameter( name='UART_comm',
+                            label='Writes/reads data to UART.',
+                            #vals=vals.Numbers(0,255),
+                            unit='',
+                            set_cmd='UART:WRITE' + str(self.UART_data_length()) + ' ' + '{}',
+                            get_cmd='UART:READ' + str(self.UART_data_length()),
+                            #get_parser = int
+                            )
+
 
             
         ## signal generators
         min_frequency = 1
         max_frequency = 50e6
         max_voltage = 1
-        awg_array_size = 16384
 
         # output generators
         outputs = ['1', '2']
@@ -213,7 +313,7 @@ class Redpitaya(VisaInstrument):
 
             self.add_parameter( name='OUT' + out + '_awg',
                                 label='Arbitrary waveform for the output',
-                                vals=vals.Arrays(min_value=-max_voltage, max_value=max_voltage ,shape=(awg_array_size,)),
+                                vals=vals.Arrays(min_value=-max_voltage, max_value=max_voltage ,shape=(self.BUFFER_SIZE,)),
                                 unit='',
                                 set_cmd='SOUR' + out + ':TRAC:DATA:DATA ' + '{:.12f}',
                                 get_cmd='SOUR' + out + ':TRAC:DATA:DATA?',
@@ -380,7 +480,6 @@ class Redpitaya(VisaInstrument):
 
         ## Parameters for a run data acquisition
         # length of the acquisition
-        
         self.add_parameter( 'acquisition_length',
                             initial_value=1,
                             unit='s',
@@ -470,6 +569,90 @@ class Redpitaya(VisaInstrument):
                             vals=vals.Arrays(shape=(self.number_of_waveforms.get_latest,self.waveform_points.get_latest,))
                             )
         
+
+        ## Parameters for a the VNA
+        # all the settings of the vna mode are here
+        self.add_parameter( 'vna_amplitude',
+                            initial_value=0.1,
+                            unit='V',
+                            label='Amplitude of the probe tone',
+                            vals=vals.Numbers(0, 1),
+                            set_cmd=None,
+                            get_cmd=None,
+                            get_parser=float
+                            )
+
+        self.add_parameter( 'vna_start',
+                            unit='Hz',
+                            initial_value=1e5,
+                            label='Start frequency of the VNA trace',
+                            vals=vals.Numbers(min_frequency, max_frequency),
+                            get_cmd=None,
+                            set_cmd=None,
+                            get_parser=float
+                            )
+
+        self.add_parameter( 'vna_stop',
+                            unit='Hz',
+                            initial_value=1e5,
+                            label='Stop frequency of the VNA trace',
+                            vals=vals.Numbers(min_frequency, max_frequency),
+                            get_cmd=None,
+                            set_cmd=None,
+                            get_parser=float
+                            )
+
+        self.add_parameter( 'vna_points',
+                            unit='',
+                            initial_value=101,
+                            label='Number of points in a VNA trace',
+                            vals=vals.Numbers(1, np.inf),
+                            get_cmd=None,
+                            set_cmd=None,
+                            get_parser=int
+                            )
+
+        self.add_parameter( 'vna_rbw',
+                            unit='Hz',
+                            initial_value=1e5,
+                            label='Resolution bandwidth of the VNA trace',
+                            vals=vals.Numbers(self.FS / self.BUFFER_SIZE / self.ADC_decimation(), self.FS),
+                            get_cmd=None,
+                            set_cmd=None,
+                            get_parser=float
+                            )
+
+        self.add_parameter( 'vna_averages',
+                            unit='',
+                            initial_value=1,
+                            label='Resolution bandwidth of the VNA trace',
+                            vals=vals.Numbers(1, np.inf),
+                            get_cmd=None,
+                            set_cmd=None,
+                            get_parser=int
+                            )
+
+        ## measured traces
+        self.add_parameter( 'frequency_axis',
+                            unit='Hz',
+                            label='Frequency',
+                            parameter_class=GeneratedSetPoints,
+                            start_param = self.vna_start,
+                            stop_param=self.vna_stop,
+                            num_points_param=self.vna_points,
+                            snapshot_value=False,
+                            vals=vals.Arrays(shape=(self.vna_points.get_latest,))
+                            )
+
+        # trace of channel 1
+        self.add_parameter( 'VNA1',
+                            unit='dB',
+                            label='Input 1 trace',
+                            parameter_class=VNA1_trace,
+                            setpoints=(self.frequency_axis,),
+                            vals=vals.Arrays(shape=(self.vna_points.get_latest,))
+                            )
+
         
         # good idea to call connect_message at the end of your constructor.
         # this calls the 'IDN' parameter that the base Instrument class creates 
@@ -535,6 +718,19 @@ class Redpitaya(VisaInstrument):
 
         return raw_data
 
+    def ADC_read_N_from_A_bin(self, channel, size: int, pointer: int):
+        # read N binary samples from the buffer of the Redpitaya starting from the pointer
+
+        scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:STA:N? ' + str(pointer) + ',' + str(size)
+        raw_data = self.visa_handle.query_binary_values( scpi_string, 
+                                                         datatype='f', 
+                                                         is_big_endian=True,
+                                                         expect_termination=False, 
+                                                         data_points=size,
+                                                         container=np.ndarray
+                                                         )
+        return raw_data
+
     def ADC_read_A_to_B(self, channel, pointer_A: int, pointer_B: int):
         # read B-A samples from the buffer of the Redpitaya starting from pointer A
 
@@ -558,7 +754,7 @@ class Redpitaya(VisaInstrument):
                                                          datatype='f', 
                                                          is_big_endian=True,
                                                          expect_termination=False, 
-                                                         data_points=self.BUFFER_SIZE,
+                                                         data_points=size,
                                                          container=np.ndarray
                                                          )
 
@@ -572,14 +768,27 @@ class Redpitaya(VisaInstrument):
 
         return raw_data
 
+    def ADC_read_buffer_bin(self, channel):
+        # read the whole buffer of the selected channel
+
+        scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA?'
+        raw_data = self.visa_handle.query_binary_values( scpi_string, 
+                                                         datatype='f', 
+                                                         is_big_endian=True,
+                                                         expect_termination=False, 
+                                                         data_points=self.BUFFER_SIZE,
+                                                         container=np.ndarray
+                                                         )
+
+        return raw_data
+
 
     # composite acquisition functions
-
     def get_data(self, channel, duration, data_type='ASCII'):
     # This is the core part of the measurement, with a defined measurement length it
     # keeps reading and emptying the Redpitaya buffer, concatenating the waveforms.
 
-        DEC = self.ADC_decimation()
+        #DEC = self.ADC_decimation()
         BLOCK = self.BUFFER_SIZE
         self.ADC_data_format(data_type)
 
@@ -639,7 +848,7 @@ class Redpitaya(VisaInstrument):
             time.sleep(0.2)
 
             t0 = time.time()
-            self.ADC_write_pointer(0)
+            #self.ADC_write_pointer(0)
             pbar = tqdm(total=100)
 
             while t < duration:
@@ -653,12 +862,10 @@ class Redpitaya(VisaInstrument):
                 new_waveform = self.ADC_read_N_after_trigger_bin(channel, BLOCK)
                 data = np.append(data, new_waveform)
                 #print(data)
-                
-                self.number_of_waveforms(index)
-                self.ADC_write_pointer(0)
 
-                # update the time which passed from the beginning of the run
+                # update the time which passed from the beginning of the run and the wavefor index
                 t = time.time() - t0
+                self.number_of_waveforms(index)
                 pbar.update(int(100 * t / duration - pbar.n))
 
             pbar.close()
@@ -673,10 +880,64 @@ class Redpitaya(VisaInstrument):
         else:
             raise NameError('Format must be BIN or ASCII')
 
+    def spectrscopy(self, channel, frequency):
+    # This function is used in the VNA classes and, as of the name, it used for spectroscopy.
+    # It considers a tone at a single frequency, outputs the ratio between input and output amplitude.
+        rbw = self.vna_rbw()
+        DEC = self.ADC_decimation()
+        min_rbw = self.FS / self.BUFFER_SIZE / DEC
+        amp = self.vna_amplitude()
+
+        BLOCK = int(self.FS / rbw / self.ADC_decimation())
+        if BLOCK > self.BUFFER_SIZE:
+            raise MemoryError('Resolution bandwidth too low to handle. \nWith this decimation the minimum is ' + min_rbw + 'Hz.')
+
+        if channel == 1:
+            self.OUT1_amplitude(amp)
+            self.OUT1_frequency(frequency)
+
+        elif channel == 2:
+            self.OUT2_amplitude(amp)
+            self.OUT2_frequency(frequency)
+
+        else:
+            raise NameError('Invalid channel.')
+
+        # read data
+        self.ADC_write_pointer(0)
+        self.ADC_trigger('NOW')
+
+        waveform = self.ADC_read_N_after_trigger_bin(channel, BLOCK)
+
+        # The idea is to implement the rbw by doing an FFT of the whole sample and saving the max.
+        # It could actually be improved by using a digital lock-in amplifier at the pump frequency.
+        f = periodogram(waveform, fs=self.FS/DEC)[0]
+        m = periodogram(waveform, window='hann', fs=self.FS/DEC)[1]
+
+        real_rbw =  f[1] - f[0]
+        s_max = real_rbw * np.max(m)
+
+        return 2 * np.sqrt(2) * s_max / amp**2
+
+
+
+    ## UART protocol
+    # TX RX communication ports, most of the communication is handled thourgh the parameters
+    def UART_init(self):
+        # initialises the API for working with UART
+        self.write('UART:INIT')
+
+    def UART_setup(self):
+        # apply the setup to the UART
+        self.write('UART:SETUP')
+
+    def UART_release(self):
+        # releases all used resources
+        self.write('UART:RELEASE')
         
 
     ## helpers
-        
+    # 
     def format_output_status(self, status_in):
         # to return ON and OFF when asked for the status of outputs
         if status_in == '0': 
@@ -690,3 +951,4 @@ class Redpitaya(VisaInstrument):
         duty_cycle = self.number_of_waveforms() * (self.BUFFER_SIZE / self.FS * self.ADC_decimation())
 
         return duty_cycle
+
