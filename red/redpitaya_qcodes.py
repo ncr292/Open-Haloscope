@@ -6,7 +6,9 @@ import time
 import binascii
 
 import numpy as np
-from scipy.signal import periodogram
+from scipy.signal import periodogram, butter, sosfilt
+import matplotlib.pyplot as plt
+
 from tqdm import tqdm
 
 from qcodes import validators as vals
@@ -104,6 +106,7 @@ class VNA1_trace(MultiParameter):
         stop_frequency = self._instrument.vna_stop()
         number_of_points = self._instrument.vna_points()
         number_of_averages = self._instrument.vna_averages()
+        amplitude = self._instrument.vna_amplitude()
 
         # initalise the trace array
         frequency = np.linspace(start_frequency, stop_frequency, number_of_points)
@@ -113,6 +116,7 @@ class VNA1_trace(MultiParameter):
         # first turn on the ADC and the sources
         self._instrument.ADC_data_format('BIN')
         self._instrument.ADC_start()
+        self._instrument.ADC_trigger_level(amplitude/1)
 
         self._instrument.OUT_trigger()
         self._instrument.OUT1_status('ON')
@@ -150,6 +154,7 @@ class VNA2_trace(MultiParameter):
         stop_frequency = self._instrument.vna_stop()
         number_of_points = self._instrument.vna_points()
         number_of_averages = self._instrument.vna_averages()
+        amplitude = self._instrument.vna_amplitude()
 
         # initalise the trace array
         frequency = np.linspace(start_frequency, stop_frequency, number_of_points)
@@ -159,6 +164,8 @@ class VNA2_trace(MultiParameter):
         # first turn on the ADC and the sources
         self._instrument.ADC_data_format('BIN')
         self._instrument.ADC_start()
+        self._instrument.ADC_trigger_level(amplitude/100)
+
 
         self._instrument.OUT_trigger()
         self._instrument.OUT2_status('ON')
@@ -166,6 +173,7 @@ class VNA2_trace(MultiParameter):
         # then measure the points from channel 2
         for avg in range(number_of_averages):
             for point in tqdm(range(number_of_points)):
+                #time.sleep(0.2)
                 m0, p0 = self._instrument.spectrscopy(2, frequency[point])
                 magnitude[point] += m0
                 phase[point] += p0
@@ -728,7 +736,6 @@ class Redpitaya(VisaInstrument):
         
     ## functions
     # signal generators
-
     def align_channels_phase(self):
         # Align the phase of the outputs
         self.write('PHAS:ALIGN')
@@ -756,7 +763,6 @@ class Redpitaya(VisaInstrument):
 
     ## acquisition
     # analog-to-digital converter
-        
     def ADC_start(self):
         # Start the acquisition
         self.write('ACQ:START')
@@ -887,7 +893,7 @@ class Redpitaya(VisaInstrument):
                 data += self.ADC_read_N_after_trigger(channel, BLOCK)[1:-1] + ','
 
                 self.number_of_waveforms(index)
-                self.ADC_write_pointer(0)
+                #self.ADC_write_pointer(0)
 
                 # update the time which passed from the beginning of the run
                 t = time.time() - t0
@@ -959,24 +965,25 @@ class Redpitaya(VisaInstrument):
         if channel == 1:
             self.OUT1_amplitude(amp)
             self.OUT1_frequency(frequency)
+            self.ADC_trigger('CH1_PE')
 
         elif channel == 2:
             self.OUT2_amplitude(amp)
             self.OUT2_frequency(frequency)
+            self.ADC_trigger('CH2_PE')
 
         else:
             raise NameError('Invalid channel.')
 
         # read data
         self.ADC_write_pointer(0)
-        self.ADC_trigger('NOW')
-
-        waveform = self.ADC_read_N_after_trigger_bin(channel, BLOCK)
 
         # phase and magnitude are extracted from the digital lockin
-        rho, phi = self.lockin(waveform, frequency, DEC)
+        BLOCK = self.BUFFER_SIZE
+        waveform = self.ADC_read_N_after_trigger_bin(channel, BLOCK)
+        z = self.lockin(waveform - np.mean(waveform), frequency, DEC)
 
-        return 2*rho / amp, phi
+        return 2*np.abs(z) / amp, np.angle(z)
 
 
 
@@ -1004,13 +1011,14 @@ class Redpitaya(VisaInstrument):
         numeric_time = np.linspace(0, points-1, points)
         sine = np.sin(2*np.pi * numeric_frequency * numeric_time)
         cosine = np.cos(2*np.pi * numeric_frequency * numeric_time)
+
+        # definition of the filter
+        sos = butter(5, numeric_frequency/4, fs=1, output='sos')
+        # mixing and filtering
+        x = sosfilt(sos, signal * sine)[-1]
+        y = sosfilt(sos, signal * cosine)[-1]
         
-        x = np.mean(signal * sine)
-        y = np.mean(signal * cosine)
-        rho = np.sqrt(x**2 + y**2)
-        phi = np.arctan(y/x)
-        
-        return rho, phi
+        return x + 1j*y
 
     def format_output_status(self, status_in):
         # to return ON and OFF when asked for the status of outputs
