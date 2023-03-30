@@ -91,7 +91,7 @@ class IN2_data(ParameterWithSetpoints):
         return data
 
 
-class VNA1_trace(ParameterWithSetpoints):
+class VNA1_trace(MultiParameter):
     ## Formats and outputs the raw data acquired by the Redpitaya
     # Note: one needs to set the decimation before using the VNA, so to use a 
     # large decimation for the low frequency traces and viceversa.
@@ -107,7 +107,8 @@ class VNA1_trace(ParameterWithSetpoints):
 
         # initalise the trace array
         frequency = np.linspace(start_frequency, stop_frequency, number_of_points)
-        trace = np.zeros(number_of_points)
+        magnitude = np.zeros(number_of_points)
+        phase = np.zeros(number_of_points)
 
         # first turn on the ADC and the sources
         self._instrument.ADC_data_format('BIN')
@@ -116,18 +117,67 @@ class VNA1_trace(ParameterWithSetpoints):
         self._instrument.OUT_trigger()
         self._instrument.OUT1_status('ON')
 
+        # rest
+        time.sleep(0.2)
+
         # then measure the points from channel 1
         for avg in range(number_of_averages):
             for point in tqdm(range(number_of_points)):
-                trace[point] += self._instrument.spectrscopy(1, frequency[point])
+                m0, p0 = self._instrument.spectrscopy(1, frequency[point])
+                magnitude[point] += m0
+                phase[point] += p0
 
-        trace = trace / number_of_averages
+        magnitude = magnitude / number_of_averages
+        phase = phase / number_of_averages
 
         # eventually turn off the ADC and the sources
         self._instrument.ADC_stop()
         self._instrument.OUT1_status('OFF')
         
-        return 10 * np.log10(trace)
+        return magnitude, phase
+
+
+class VNA2_trace(MultiParameter):
+    ## Formats and outputs the raw data acquired by the Redpitaya
+    # Note: one needs to set the decimation before using the VNA, so to use a 
+    # large decimation for the low frequency traces and viceversa.
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def get_raw(self):
+        start_frequency = self._instrument.vna_start()
+        stop_frequency = self._instrument.vna_stop()
+        number_of_points = self._instrument.vna_points()
+        number_of_averages = self._instrument.vna_averages()
+
+        # initalise the trace array
+        frequency = np.linspace(start_frequency, stop_frequency, number_of_points)
+        magnitude = np.zeros(number_of_points)
+        phase = np.zeros(number_of_points)
+
+        # first turn on the ADC and the sources
+        self._instrument.ADC_data_format('BIN')
+        self._instrument.ADC_start()
+
+        self._instrument.OUT_trigger()
+        self._instrument.OUT2_status('ON')
+
+        # then measure the points from channel 2
+        for avg in range(number_of_averages):
+            for point in tqdm(range(number_of_points)):
+                m0, p0 = self._instrument.spectrscopy(2, frequency[point])
+                magnitude[point] += m0
+                phase[point] += p0
+
+        magnitude = magnitude / number_of_averages
+        phase = phase / number_of_averages
+
+        # eventually turn off the ADC and the sources
+        self._instrument.ADC_stop()
+        self._instrument.OUT2_status('OFF')
+        
+        return magnitude, phase
 
 
 class Redpitaya(VisaInstrument):
@@ -156,25 +206,26 @@ class Redpitaya(VisaInstrument):
         max_get_voltage = 3.3
         max_set_voltage = 1.8
         
-        for pin in (input_pin + output_pin):
+        for pin in output_pin:
             # get the voltage for any of the analog pins
-            self.add_parameter( name='get_' + pin,
+            self.add_parameter( name=pin,
                                 label='Read input/output voltage on pin',
                                 vals=vals.Numbers(-max_get_voltage, max_get_voltage),
                                 unit='V',
-                                set_cmd=None,
+                                set_cmd='ANALOG:PIN ' + pin + ',' + '{:.12f}',
                                 get_cmd='ANALOG:PIN? ' + pin,
                                 get_parser=float
                                 )        
             
-        for pin in output_pin:
+        for pin in input_pin:
             # set the voltage for the output pins
-            self.add_parameter( name='set_'  +pin,
+            self.add_parameter( name=pin,
                                 label='Set output voltage on pin',
                                 vals=vals.Numbers(-max_set_voltage, max_set_voltage),
                                 unit='V',
-                                set_cmd='ANALOG:PIN ' + pin + ',' + '{:.12f}',
-                                get_cmd=None,
+                                set_cmd=None,
+                                get_cmd='ANALOG:PIN? ' + pin,
+                                get_parser=float
                                 )  
             
         # UART in/out
@@ -646,11 +697,24 @@ class Redpitaya(VisaInstrument):
 
         # trace of channel 1
         self.add_parameter( 'VNA1',
-                            unit='dB',
-                            label='Input 1 trace',
                             parameter_class=VNA1_trace,
-                            setpoints=(self.frequency_axis,),
-                            vals=vals.Arrays(shape=(self.vna_points.get_latest,))
+                            names = ('VNA1_mag', 'VNA1_phase'),
+                            units=('dB', 'rad'),
+                            labels=('Channel 1 magnitude', 'Channel 1 phase'),
+                            setpoints=((self.frequency_axis(),), (self.frequency_axis(),)),
+                            vals=vals.Arrays(shape=((self.vna_points.get_latest,), (self.vna_points.get_latest,))),
+                            shapes=((self.vna_points(),), (self.vna_points(),),),
+                            )
+
+        # trace of channel 2
+        self.add_parameter( 'VNA2',
+                            parameter_class=VNA2_trace,
+                            names = ('VNA2_mag', 'VNA2_phase'),
+                            units=('dB', 'rad'),
+                            labels=('Channel 2 magnitude', 'Channel 2 phase'),
+                            setpoints=((self.frequency_axis(),), (self.frequency_axis(),)),
+                            vals=vals.Arrays(shape=((self.vna_points.get_latest,), (self.vna_points.get_latest,))),
+                            shapes=((self.vna_points(),), (self.vna_points(),),),
                             )
 
         
@@ -909,15 +973,10 @@ class Redpitaya(VisaInstrument):
 
         waveform = self.ADC_read_N_after_trigger_bin(channel, BLOCK)
 
-        # The idea is to implement the rbw by doing an FFT of the whole sample and saving the max.
-        # It could actually be improved by using a digital lock-in amplifier at the pump frequency.
-        f = periodogram(waveform, fs=self.FS/DEC)[0]
-        m = periodogram(waveform, window='hann', fs=self.FS/DEC)[1]
+        # phase and magnitude are extracted from the digital lockin
+        rho, phi = self.lockin(waveform, frequency, DEC)
 
-        real_rbw =  f[1] - f[0]
-        s_max = real_rbw * np.max(m)
-
-        return 2 * np.sqrt(2) * s_max / amp**2
+        return 2*rho / amp, phi
 
 
 
@@ -937,7 +996,22 @@ class Redpitaya(VisaInstrument):
         
 
     ## helpers
-    # 
+    # useful functions
+    def lockin(self, signal, frequency, decimation):
+        points = len(signal)
+        numeric_frequency = frequency / self.FS * decimation
+
+        numeric_time = np.linspace(0, points-1, points)
+        sine = np.sin(2*np.pi * numeric_frequency * numeric_time)
+        cosine = np.cos(2*np.pi * numeric_frequency * numeric_time)
+        
+        x = np.mean(signal * sine)
+        y = np.mean(signal * cosine)
+        rho = np.sqrt(x**2 + y**2)
+        phi = np.arctan(y/x)
+        
+        return rho, phi
+
     def format_output_status(self, status_in):
         # to return ON and OFF when asked for the status of outputs
         if status_in == '0': 
