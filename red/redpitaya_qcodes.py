@@ -116,7 +116,7 @@ class VNA1_trace(MultiParameter):
         # first turn on the ADC and the sources
         self._instrument.ADC_data_format('BIN')
         self._instrument.ADC_start()
-        self._instrument.ADC_trigger_level(amplitude/1)
+        self._instrument.ADC_trigger_level(amplitude/100)
 
         self._instrument.OUT_trigger()
         self._instrument.OUT1_status('ON')
@@ -893,6 +893,7 @@ class Redpitaya(VisaInstrument):
                 data += self.ADC_read_N_after_trigger(channel, BLOCK)[1:-1] + ','
 
                 self.number_of_waveforms(index)
+                trash = self.get_output()
                 #self.ADC_write_pointer(0)
 
                 # update the time which passed from the beginning of the run
@@ -936,6 +937,8 @@ class Redpitaya(VisaInstrument):
                 # update the time which passed from the beginning of the run and the wavefor index
                 t = time.time() - t0
                 self.number_of_waveforms(index)
+                trash = self.get_output()
+
                 pbar.update(int(100 * t / duration - pbar.n))
 
             pbar.close()
@@ -979,12 +982,12 @@ class Redpitaya(VisaInstrument):
         self.ADC_write_pointer(0)
 
         # phase and magnitude are extracted from the digital lockin
-        BLOCK = self.BUFFER_SIZE
         waveform = self.ADC_read_N_after_trigger_bin(channel, BLOCK)
+        trash = self.get_output()
+
         z = self.lockin(waveform - np.mean(waveform), frequency, DEC)
 
         return 2*np.abs(z) / amp, np.angle(z)
-
 
 
     ## UART protocol
@@ -1017,6 +1020,9 @@ class Redpitaya(VisaInstrument):
         # mixing and filtering
         x = sosfilt(sos, signal * sine)[-1]
         y = sosfilt(sos, signal * cosine)[-1]
+
+        #plt.plot(np.abs(x + 1j*y))
+        #plt.plot(np.angle(x + 1j*y))
         
         return x + 1j*y
 
