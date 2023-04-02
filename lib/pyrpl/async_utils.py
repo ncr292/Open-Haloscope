@@ -94,7 +94,7 @@ class MainThreadTimer(QtCore.QTimer):
         super(MainThreadTimer, self).__init__()
         self.moveToThread(MAIN_THREAD)
         self.setSingleShot(True)
-        self.setInterval(interval)
+        self.setInterval(int(interval))
 
 
 

@@ -26,7 +26,7 @@ import logging
 import numpy as np
 from six import with_metaclass
 from collections import OrderedDict
-from qtpy import QtCore
+from PyQt5 import QtCore
 
 
 class SignalLauncher(QtCore.QObject):

@@ -494,7 +494,7 @@ class MemoryTree(MemoryBranch):
         # never reload or save more frequently than _loadsavedeadtime because
         # this is the principal cause of slowing down the code (typ. 30-200 ms)
         # for immediate saving, call _save_now, for immediate loading _load_now
-        self._loadsavedeadtime = _loadsavedeadtime
+        self._loadsavedeadtime = int(_loadsavedeadtime)
         # first, make sure filename exists
         self._filename = get_config_file(filename, source)
         if filename is None:

@@ -127,7 +127,7 @@ class NaCurveFuture(PyrplFuture):
 
         self.data_x = copy(self._module._data_x)  # In case of saving latter.
         self.data_avg = np.empty(self.n_points,
-                                 dtype=np.complex)
+                                 dtype=np.complex128)
         self.data_avg.fill(np.nan)
         self.data_amp = np.empty(self.n_points)
         self.data_amp.fill(np.nan)
@@ -414,13 +414,13 @@ class NetworkAnalyzer(AcquisitionModule, SignalModule):
 
         Returns
         -------
-        tf: np.array(..., dtype=np.complex)
+        tf: np.array(..., dtype=np.complex128)
             The complex open loop transfer function of the module.
         """
         module_delay = self._delay
-        frequencies = np.array(np.array(frequencies, dtype=np.float),
-                               dtype=np.complex)
-        tf = np.array(frequencies*0, dtype=np.complex) + 1.0
+        frequencies = np.array(np.array(frequencies, dtype=float),
+                               dtype=np.complex128)
+        tf = np.array(frequencies*0, dtype=np.complex128) + 1.0
         # input filter modelisation
         f = self.iq.inputfilter  # no for loop here because only one filter
         # stage
@@ -576,10 +576,10 @@ class NetworkAnalyzer(AcquisitionModule, SignalModule):
                       output_signal='output_direct')
 
         # setup averaging
-        self.iq._na_averages = np.int(np.round(125e6 / self.rbw *
+        self.iq._na_averages = int(np.round(125e6 / self.rbw *
                                                self.average_per_point))
         self._cached_na_averages = self.iq._na_averages
-        self.iq._na_sleepcycles = np.int(
+        self.iq._na_sleepcycles = int(
             np.round(125e6 / self.rbw * self.sleeptimes))
         # time_per_point is calculated at setup for speed reasons
         self.time_per_point = self._time_per_point()
