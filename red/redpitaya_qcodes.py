@@ -106,7 +106,6 @@ class VNA1_trace(MultiParameter):
         stop_frequency = self._instrument.vna_stop()
         number_of_points = self._instrument.vna_points()
         number_of_averages = self._instrument.vna_averages()
-        amplitude = self._instrument.vna_amplitude()
 
         # initalise the trace array
         frequency = np.linspace(start_frequency, stop_frequency, number_of_points)
@@ -115,8 +114,7 @@ class VNA1_trace(MultiParameter):
 
         # first turn on the ADC and the sources
         self._instrument.ADC_data_format('BIN')
-        self._instrument.ADC_start()
-        self._instrument.ADC_trigger_level(amplitude/100)
+        self._instrument.ADC_trigger_level(0.0)
 
         self._instrument.OUT_trigger()
         self._instrument.OUT1_status('ON')
@@ -134,8 +132,7 @@ class VNA1_trace(MultiParameter):
         magnitude = magnitude / number_of_averages
         phase = phase / number_of_averages
 
-        # eventually turn off the ADC and the sources
-        self._instrument.ADC_stop()
+        # eventually turn off the source
         self._instrument.OUT1_status('OFF')
         
         return magnitude, phase
@@ -154,7 +151,6 @@ class VNA2_trace(MultiParameter):
         stop_frequency = self._instrument.vna_stop()
         number_of_points = self._instrument.vna_points()
         number_of_averages = self._instrument.vna_averages()
-        amplitude = self._instrument.vna_amplitude()
 
         # initalise the trace array
         frequency = np.linspace(start_frequency, stop_frequency, number_of_points)
@@ -163,8 +159,7 @@ class VNA2_trace(MultiParameter):
 
         # first turn on the ADC and the sources
         self._instrument.ADC_data_format('BIN')
-        self._instrument.ADC_start()
-        self._instrument.ADC_trigger_level(amplitude/100)
+        self._instrument.ADC_trigger_level(0.0)
 
 
         self._instrument.OUT_trigger()
@@ -181,8 +176,7 @@ class VNA2_trace(MultiParameter):
         magnitude = magnitude / number_of_averages
         phase = phase / number_of_averages
 
-        # eventually turn off the ADC and the sources
-        self._instrument.ADC_stop()
+        # eventually turn off the sources
         self._instrument.OUT2_status('OFF')
         
         return magnitude, phase
@@ -426,6 +420,7 @@ class Redpitaya(VisaInstrument):
                             label='Set the decimation factor, each sample is the average of skipped samples if decimation > 1',
                             vals=vals.Enum(1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536),
                             unit='',
+                            initial_value=1,
                             set_cmd='ACQ:DEC ' + '{}',
                             get_cmd='ACQ:DEC?',
                             get_parser=int
@@ -775,6 +770,10 @@ class Redpitaya(VisaInstrument):
         # Stops the acquisition and sets all parameters to default values
         self.write('ACQ:RST')
 
+    def ADC_trigger_full(self):
+        # Returns 1 if the buffer is full of data. Otherwise returns 0
+        return self.ask('ACQ:TRIG:FILL?')
+
     def get_output(self):
         # Returns the output, which is useful to check for 'ERR!' messages
         return self.ask('OUTPUT:DATA?')
@@ -890,6 +889,12 @@ class Redpitaya(VisaInstrument):
                 self.ADC_trigger('NOW')
 
                 # read all the data
+                while 1:
+                    if self.ADC_trigger() == 'TD':
+                        break
+
+                # this reduced the maximum duty cycle to 75%            
+                time.sleep(1.5 * BLOCK / self.FS)
                 data += self.ADC_read_N_after_trigger(channel, BLOCK)[1:-1] + ','
 
                 self.number_of_waveforms(index)
@@ -930,6 +935,13 @@ class Redpitaya(VisaInstrument):
                 self.ADC_trigger('NOW')
 
                 # read all the data
+                while 1:
+                    if self.ADC_trigger() == 'TD':
+                        break
+
+                # this reduced the maximum duty cycle to 75%
+                time.sleep(1.0 * BLOCK / self.FS)
+
                 new_waveform = self.ADC_read_N_after_trigger_bin(channel, BLOCK)
                 data = np.append(data, new_waveform)
                 #print(data)
@@ -968,23 +980,35 @@ class Redpitaya(VisaInstrument):
         if channel == 1:
             self.OUT1_amplitude(amp)
             self.OUT1_frequency(frequency)
-            self.ADC_trigger('CH1_PE')
+            self.ADC_trigger('CH1_NE')
 
         elif channel == 2:
             self.OUT2_amplitude(amp)
             self.OUT2_frequency(frequency)
-            self.ADC_trigger('CH2_PE')
+            self.ADC_trigger('CH2_NE')
 
         else:
             raise NameError('Invalid channel.')
 
-        # read data
-        self.ADC_write_pointer(0)
+        #self.ADC_write_pointer(0)
+        self.OUT_trigger()
+
 
         # phase and magnitude are extracted from the digital lockin
-        waveform = self.ADC_read_N_after_trigger_bin(channel, BLOCK)
-        trash = self.get_output()
+        self.ADC_start()
 
+        # read data
+        while 1:
+            if self.ADC_trigger() == 'TD':
+                break
+        
+        # this reduced the maximum duty cycle to 75%  
+        time.sleep(1.5 * BLOCK / self.FS)
+        waveform = self.ADC_read_N_after_trigger_bin(channel, BLOCK)
+
+        self.ADC_stop()
+
+        # save the output in a complex number
         z = self.lockin(waveform - np.mean(waveform), frequency, DEC)
 
         return 2*np.abs(z) / amp, np.angle(z)
@@ -1021,8 +1045,8 @@ class Redpitaya(VisaInstrument):
         x = sosfilt(sos, signal * sine)[-1]
         y = sosfilt(sos, signal * cosine)[-1]
 
-        #plt.plot(np.abs(x + 1j*y))
-        #plt.plot(np.angle(x + 1j*y))
+        #plt.plot(np.abs(x + 1j*y), 'o')
+        #plt.plot(np.angle(x + 1j*y), 'o')
         
         return x + 1j*y
 
