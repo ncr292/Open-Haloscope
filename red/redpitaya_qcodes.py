@@ -873,8 +873,6 @@ class Redpitaya(VisaInstrument):
             # One can choose the data format to be used
             # ascii is immediately readable but slow
             data = ''
-
-            self.ADC_start()
             time.sleep(0.2)
 
             t0 = time.time()
@@ -885,6 +883,7 @@ class Redpitaya(VisaInstrument):
                 index += 1
 
                 # trigger the ADC and refill the buffer
+                self.ADC_start()
                 self.ADC_write_pointer(0)
                 self.ADC_trigger('NOW')
 
@@ -904,10 +903,10 @@ class Redpitaya(VisaInstrument):
                 # update the time which passed from the beginning of the run
                 t = time.time() - t0
                 pbar.update(int(100 * t / duration - pbar.n))
+                self.ADC_stop()
 
             pbar.close()
             time.sleep(0.2)
-            self.ADC_stop()
 
             data_string = np.array( data[1:-1].split(',') )
             data_line = data_string.astype(float)
@@ -919,8 +918,6 @@ class Redpitaya(VisaInstrument):
             # One can choose the data format to be used
             # binary is fast, using it improves the duty cycle
             data = np.array([])
-
-            self.ADC_start()
             time.sleep(0.2)
 
             t0 = time.time()
@@ -931,6 +928,7 @@ class Redpitaya(VisaInstrument):
                 index += 1
 
                 # trigger the ADC and refill the buffer
+                self.ADC_start()
                 self.ADC_write_pointer(0)
                 self.ADC_trigger('NOW')
 
@@ -952,10 +950,10 @@ class Redpitaya(VisaInstrument):
                 trash = self.get_output()
 
                 pbar.update(int(100 * t / duration - pbar.n))
+                self.ADC_stop()
 
             pbar.close()
             time.sleep(0.2)
-            self.ADC_stop()
 
             # go back to ascii at the end
             self.ADC_data_format('ASCII')
