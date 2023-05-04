@@ -988,10 +988,6 @@ class Redpitaya(VisaInstrument):
         else:
             raise NameError('Invalid channel.')
 
-        #self.ADC_write_pointer(0)
-        self.OUT_trigger()
-
-
         # phase and magnitude are extracted from the digital lockin
         self.ADC_start()
 

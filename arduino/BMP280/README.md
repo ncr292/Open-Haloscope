@@ -1,0 +1,10 @@
+## PIN CONFIGURATION
+	
+	BMP280	Arduino
+
+	Vcc			+3.3V
+	GND			GND
+	SCL (SCK)		13
+	SDA (MOSI)		11
+	CSB (CS)		10
+	SDO (MISO)		12
