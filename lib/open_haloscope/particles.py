@@ -21,7 +21,7 @@ class DMAxion(Particle):
 
     def __init__(self, *args, **kwargs):
         super().__init__(self)
-        self.n_dm = 0.3e9 / (0.01**3)    # dark matter density in eV per cubic meter
+        self.n_dm = 0.4e9 / (0.01**3)    # dark matter density in eV per cubic meter
         self.v_a = 1e-3 * c.c            # relative speed of the dark matter wind
 
         self.DFSZ_u = 1.0/3.0            # DFSZ axion upper limit
@@ -45,6 +45,11 @@ class DMAxion(Particle):
         g_p = DMAxion.g_x(self, self.DFSZ_u, m_a)
         b_eff = g_p / (2 * c.e) * np.sqrt( self.n_dm * c.hbar / c.c) * self.v_a
         return np.sqrt(c.hbar) * b_eff
+
+    # return the value of g_p given a measured field limit
+    def field_to_g_p(self, b):
+        g_p = b * (2 * c.e) / np.sqrt( self.n_dm * c.hbar / c.c) / self.v_a
+        return g_p / np.sqrt(c.hbar)
 
     # get the value of g corresponding to a mium detected fiel b_a
     def g_limit(self, b_a):
