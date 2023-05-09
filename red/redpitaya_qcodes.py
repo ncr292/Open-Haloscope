@@ -23,15 +23,6 @@ from qcodes.instrument import ( Instrument,
 from qcodes.instrument.parameter import ParameterWithSetpoints, Parameter
 
 
-"""
-DEVELOPMENT NOTES
-- 
-- 
-- 
-"""
-
-
-
 class GeneratedSetPoints(Parameter):
     # A parameter that generates a setpoint array from start, stop and num points parameters.
 
@@ -182,6 +173,84 @@ class VNA2_trace(MultiParameter):
         return magnitude, phase
 
 
+class getTemperature(Parameter):
+    ## Measures the temperature from the Arduino module
+    # Notes: 
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def get_raw(self):  
+
+        # start UART communication
+        self._instrument.UART_init()
+        self._instrument.UART_setup()
+
+        # the Aruino is configured to return the pressure when prompted with a 'p'
+        t = str( ord('t') )
+
+        # set the length of the message and send it, since it is a single letter the length is 1
+        self._instrument.UART_data_length(1)
+        self._instrument.UART_write(t)   
+        
+        # set the length of the response, which is 7 bytes (e.g. 1023.51 = 7 characters) plus stop byte and new line
+        self._instrument.UART_data_length(7)
+        t_string = self._instrument.UART_read() 
+        
+        # format the response into a number
+        t_string = t_string[1:-1].split(',')
+        t_string = list(map(int, t_string[0:5]))
+        t_string = "".join( list(map(chr, t_string)))
+
+        # pressure
+        t = float(t_string)
+
+        # close UART communication
+        self._instrument.UART_release()
+
+        celsius_to_K = 273.15
+        return t + celsius_to_K
+
+
+class getPressure(Parameter):
+    ## Measures the temperature from the Arduino module
+    # Notes: 
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def get_raw(self):  
+
+        # start UART communication
+        self._instrument.UART_init()
+        self._instrument.UART_setup()
+
+        # the Aruino is configured to return the pressure when prompted with a 'p'
+        p = str( ord('p') )
+
+        # set the length of the message and send it, since it is a single letter the length is 1
+        self._instrument.UART_data_length(1)
+        self._instrument.UART_write(p)   
+
+        # set the length of the response, which is 7 bytes (e.g. 1023.51 = 7 characters) plus stop byte and new line
+        self._instrument.UART_data_length(9)
+        p_string = self._instrument.UART_read() 
+
+        # format the response into a number
+        p_string = p_string[1:-1].split(',')
+        p_string = list(map(int, p_string[0:7]))
+        p_string = "".join( list(map(chr, p_string)))
+
+        # pressure
+        p = float(p_string)
+
+        # close UART communication
+        self._instrument.UART_release()
+
+        hPa_to_bar = 1e-3
+        return hPa_to_bar*p
+
+
 class Redpitaya(VisaInstrument):
     ## main driver
     def __init__(self, name, address, **kwargs):
@@ -230,12 +299,8 @@ class Redpitaya(VisaInstrument):
                                 get_parser=float
                                 )  
             
-        # UART in/out
+        # UART communication
         # handling parameters
-
-        """
-        Still not working, the communication does not communicate.
-        """
         self.add_parameter( name='UART_bits',
                             label='Sets the character size in bits.',
                             vals=vals.Enum('CS6', 'CS7', 'CS8'),
@@ -286,17 +351,63 @@ class Redpitaya(VisaInstrument):
                             get_parser = int            
                             )
 
-        self.add_parameter( name='UART_comm',
-                            label='Writes/reads data to UART.',
-                            #vals=vals.Numbers(0,255),
+        # SPI communication
+        # handling parameters
+        self.add_parameter( name='SPI_mode',
+                            label='Mode for SPI.',
+                            vals=vals.Enum('LISL', 'LIST', 'HISL', 'HIST'),
                             unit='',
-                            set_cmd='UART:WRITE' + str(self.UART_data_length()) + ' ' + '{}',
-                            get_cmd='UART:READ' + str(self.UART_data_length()),
-                            #get_parser = int
+                            set_cmd='SPI:SET:MODE ' + '{}',
+                            get_cmd='SPI:SET:MODE?'
+                            )
+
+        self.add_parameter( name='SPI_csmode',
+                            label='CS mode for SPI.',
+                            vals=vals.Enum('NORMAL', 'HIGH'),
+                            unit='',
+                            set_cmd='SPI:SET:CSMODE ' + '{}',
+                            get_cmd='SPI:SET:CSMODE?'
+                            )
+
+        self.add_parameter( name='SPI_speed',
+                            label='Speed of the SPI connection.',
+                            vals=vals.Numbers(1,100000000),
+                            unit='',
+                            set_cmd='SPI:SET:SPEED ' + '{}',
+                            get_cmd='SPI:SET:SPEED?',
+                            get_parser=int
+                            )
+
+        self.add_parameter( name='SPI_word',
+                            label='Length of the word in bits.',
+                            vals=vals.Numbers(7,np.inf),
+                            unit='',
+                            set_cmd='SPI:SET:WORD ' + '{}',
+                            get_cmd='SPI:SET:WORD?',
+                            get_parser=int
+                            )
+
+        # I2C communication
+        # handling parameters
+        self.add_parameter( name='I2C_dev',
+                            label='Device address on the I2C bus in dec format.',
+                            #vals=vals.Enum('LISL', 'LIST', 'HISL', 'HIST'),
+                            unit='',
+                            set_cmd=None,
+                            get_cmd='I2C:DEV?'
+                            )
+
+        self.add_parameter( name='I2C_fmode',
+                            label='Enables forced bus operation even if the device is in use.',
+                            vals=vals.Enum('ON', 'OFF'),
+                            unit='',
+                            set_cmd='I2C:FMODE ' + '{}',
+                            get_cmd='I2C:FMODE?'
                             )
 
 
-            
+
+
         ## signal generators
         min_frequency = 1
         max_frequency = 50e6
@@ -720,6 +831,20 @@ class Redpitaya(VisaInstrument):
                             shapes=((self.vna_points(),), (self.vna_points(),),),
                             )
 
+        ## sensors data     
+        self.add_parameter( 'temperature',
+                            parameter_class=getTemperature,
+                            unit='K',
+                            label = 'Temperature',
+                            vals=vals.Numbers(0, np.inf),
+                            )
+
+        self.add_parameter( 'pressure',
+                            parameter_class=getPressure,
+                            unit='bar',
+                            label = 'Pressure',
+                            vals=vals.Numbers(0, np.inf),
+                            )
         
         # good idea to call connect_message at the end of your constructor.
         # this calls the 'IDN' parameter that the base Instrument class creates 
@@ -1009,7 +1134,6 @@ class Redpitaya(VisaInstrument):
 
 
     ## UART protocol
-    # TX RX communication ports, most of the communication is handled thourgh the parameters
     def UART_init(self):
         # initialises the API for working with UART
         self.write('UART:INIT')
@@ -1018,10 +1142,132 @@ class Redpitaya(VisaInstrument):
         # apply the setup to the UART
         self.write('UART:SETUP')
 
+    def UART_write(self, message:str):
+        # writes data to UART, <self.UART_data_length()> is the length of data sent to UART
+        self.write('UART:WRITE' + str(self.UART_data_length()) + ' ' + message)
+
+    def UART_read(self):
+        # reads data from UART, <self.UART_data_length()> is the length of data received from UART
+        message = self.ask('UART:READ' + str(self.UART_data_length()))
+        return message
+
     def UART_release(self):
         # releases all used resources
         self.write('UART:RELEASE')
+
+    ## SPI protocol
+    def SPI_init(self):
+        # initializes the API for working with SPI
+        self.write('SPI:INIT')
+
+    def SPI_init_dev(self, path: str):
+        # initializes the API for working with SPI. <path> - Path to the SPI device
+        # on some boards, it may be different from the standard: /dev/spidev1.0 
+        self.write('SPI:INIT:DEV "' + path + '"')
         
+    def SPI_release(self):
+        # releases all used resources
+        self.write('SPI:RELEASE')
+
+    def SPI_default_settings(self):
+        # sets the settings for SPI to default values
+        self.write('SPI:SET:DEF')
+
+    def SPI_set_settings(self):
+        # sets the specified settings for SPI
+        # executed after specifying the parameters of communication
+        self.write('SPI:SET:SET')
+
+    def SPI_get_settings(self):
+        # gets the specified settings for SPI
+        self.write('SPI:SET:GET')
+
+    def SPI_create_message_queue(self, N):
+        # creates a message queue for SPI (reserves the space for data buffers)
+        # once created, they need to be initialized
+        # N - the number of messages in the queue
+        # the message queue can operate within a single CS state switch
+        self.write('SPI:MSG:CREATE ' + str(N))
+
+    def SPI_delete_messages(self):
+        # deletes all messages and data buffers allocated for them
+        self.write('SPI:MSG:DEL')
+
+    def SPI_get_message_size(self):
+        # returns the length of the message queue
+        return self.ask('SPI:MSG:SIZE?')
+
+    def SPI_send_message(self, N:int, M:int, message:str):
+        # sets data for the write buffer for the specified message
+        # N - index of message 0 <= N < msg queue size
+        # M - TX buffer length
+        # Sends <m> ‘bytes’ from message N, no data is received
+        self.write('SPI:MSG' + str(N) + ':TX' + str(M) + message)
+
+    def SPI_send_cs_message(self, N:int, M:int, message:str):
+        # sets data for the write buffer for the specified message
+        # N - index of message 0 <= N < msg queue size
+        # M - TX buffer length
+        # Sends <m> ‘bytes’ from message N, no data is received
+        self.write('SPI:MSG' + str(N) + ':TX' + str(M) + ':CS' + message)
+
+    def SPI_send_receive_message(self, N:int, M:int, message_tx:str):
+        # sets data for the write buffer for the specified message
+        # N - index of message 0 <= N < msg queue size
+        # M - TX buffer length
+        # sends <m> ‘bytes’ from message N, and receives the same amount of data from the dataline
+        message_rx = self.ask('SPI:MSG' + str(N) + ':TX' + str(M) + ':RX' + message_tx)
+        return message_rx
+
+    def SPI_send_receive_cs_message(self, N:int, M:int, message_tx:str):
+        # sets data for the write buffer for the specified message
+        # N - index of message 0 <= N < msg queue size
+        # M - TX buffer length
+        # sends <m> ‘bytes’ from message N, and receives the same amount of data from the dataline
+        message_rx = self.ask('SPI:MSG' + str(N) + ':TX' + str(M) + ':RX:CS' + message_tx)
+        return message_rx
+
+    def SPI_receive_message(self, N:int, M:int):
+        # initializes a buffer for reading the specified message
+        # N - index of message 0 <= N < msg queue size
+        # M - RX buffer length
+        # receives M ‘bytes’ into message N, no data is transmitted
+        message_rx = self.ask('SPI:MSG' + str(N) + ':RX' + str(M))
+        return message_rx
+
+    def SPI_receive_cs_message(self, N:int, M:int):
+        # initializes a buffer for reading the specified message
+        # N - index of message 0 <= N < msg queue size
+        # M - RX buffer length
+        # receives M ‘bytes’ into message N, no data is transmitted
+        message_rx = self.ask('SPI:MSG' + str(N) + ':RX' + str(M) + ':CS')
+        return message_rx
+
+    def SPI_get_message_read_buffer(self, N):
+        # returns a read buffer for the specified message
+        buffer = self.ask('SPI:MSG' + str(N) + ':RX?')
+        return buffer
+
+    def SPI_get_message_write_buffer(self, N):
+        # returns a read buffer for the specified message
+        buffer = self.ask('SPI:MSG' + str(N) + ':TX?')
+        return buffer
+
+    def SPI_message_cs_mode_settings(self, N):
+        # returns the setting for CS mode for the specified message
+        settings = self.ask('SPI:MSG' + str(N) + ':CS?')
+        return settings
+
+    def SPI_pass(self):
+        # sends the prepared messages to the SPI device
+        self.write('SPI:PASS')
+
+    ## I2C protocol
+    def I2C_set_dev(self, addr:int, path:str):
+        # initializes settings for I2C. <path> - Path to the I2C device <addr>
+        print('I2C:DEV' + str(addr) + ' "' + path + '"')
+        self.write('I2C:DEV' + str(addr) + ' "' + path + '"')
+
 
     ## helpers
     # useful functions

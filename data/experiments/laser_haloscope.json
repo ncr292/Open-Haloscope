@@ -1,0 +1,11 @@
+
+{
+    "_parameters_Alca": "Parameters used in the fermionic haloscope at laser frequencies",
+    "f0": 100e12,
+    "Q": 1e4,
+    "An": 1e-18,
+    "Ap": 1e1,
+    "beta1": 1,
+    "beta2": 1,
+    "operating_frequency": "100 THz"
+}

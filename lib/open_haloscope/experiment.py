@@ -6,6 +6,7 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import butter, sosfilt
+from scipy import constants as c
 
 
 class Experiment():
@@ -64,10 +65,31 @@ class Experiment():
 class FermionicHaloscope(Experiment):
     def __init__(self, experiment_json):
         super().__init__(experiment_json)
-        self.f0 = 0
-        self.Q = 0
 
         self._initialiseExperiment(experiment_json)
+        
+        self.sensitivity_parameters = {"f0": self.experiment_parameters['f0'],       # frequency of the resonance 
+                                       "Q": self.experiment_parameters['Q'],         # quality factor of the resonance
+                                       "An": self.experiment_parameters['An'],       # amplitude/rt(Hz) of the noise
+                                       "Ap": self.experiment_parameters['Ap'],       # amplitude of the pump
+                                       "beta1": self.experiment_parameters['beta1'], # coupling of antenna 1
+                                       "beta2": self.experiment_parameters['beta2']  # coupling of antenna 2
+                                       }
+
+    def get_sensitivity(self, f0, Q, An, Ap, beta1, beta2):
+        """
+        This function return the sensitivity of the haloscope given some specified quantities.
+        Supposedly, the expected (or already measured) parameters are in the experiment .json file,
+        which can be loaded and passed to this function to calculate the expected sensitivity.
+        """
+
+        # electron gyromagnetic ration in MHz/T
+        gamma = c.physical_constants['electron gyromag. ratio in MHz/T'][0] * 1e6
+        B0 = f0 / gamma
+        eta = (1 + beta2) / 2 * np.sqrt((1 + beta1) / (beta1 * beta2))
+
+        b = 2 * eta * B0 / (np.pi * Q) * (An / Ap)
+        return b
 
     def analyse_run(self):
         return 0

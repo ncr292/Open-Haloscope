@@ -1,0 +1,11 @@
+
+{
+    "_parameters_Alca": "Parameters used in the fermionic haloscope at microwave frequency",
+    "f0": 10e9,
+    "Q": 1e3,
+    "An": 1e-10,
+    "Ap": 1e0,
+    "beta1": 1,
+    "beta2": 1,
+    "operating_frequency": "10 GHz"
+}
