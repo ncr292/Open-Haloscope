@@ -14,7 +14,7 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
 
   Serial.begin(9600);       // initialise UART with baud rate of 9600 bps
-  Serial.setTimeout(100);   // timeout to wait all the string to arrive
+  Serial.setTimeout(5);   // timeout to wait all the string to arrive
   bmp.begin();              // initialise the BMP280
 }
 
@@ -30,7 +30,10 @@ void loop() {
     if (data_rcvd == 't') Serial.println(bmp.readTemperature()); // return temperature
     //if (data_rcvd == 'b') Serial.println(bmp.readMagneticField()); // return B-field
     //if (data_rcvd == 'l') Serial.println(readLight()); // return temperature
+
+    digitalWrite(LED_BUILTIN, HIGH); // turn on the led 
+    delay(100);
+    digitalWrite(LED_BUILTIN, LOW); // turn off the led 
   }
-  
-  delay(10);
+
 }

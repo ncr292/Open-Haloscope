@@ -66,6 +66,8 @@ class FermionicHaloscope(Experiment):
     def __init__(self, experiment_json):
         super().__init__(experiment_json)
 
+        self.instruments = []
+        self.sampling_frequency
         self._initialiseExperiment(experiment_json)
         
         self.sensitivity_parameters = {"f0": self.experiment_parameters['f0'],       # frequency of the resonance 
@@ -91,6 +93,50 @@ class FermionicHaloscope(Experiment):
         b = 2 * eta * B0 / (np.pi * Q) * (An / Ap)
         return b
 
+    def initialise_haloscope(self, 
+                             instruments_list,
+                             decimation = 4,
+                             trigger = 0.0,
+                             ):
+
+        ## initialisation of the experimental apparatus
+        # here, one needs to add all the intruments used in the setup, which will
+        # then be used to set-up the experiment before starting the operation.
+
+        print('Loading instrumentation')
+        for instrument in instruments_list:
+            self.instruments.append(instrument)
+            if instrument.name == 'redpitaya': red = instrument
+
+            print(' ', instrument.name, 'added to the experiment')
+
+        # rf configuration
+        print('\nSetup the radiofrequency lines')
+
+        # input
+        red.ADC_averaging('OFF')
+        red.ADC_decimation(decimation)
+
+        red.ADC_trigger_level(trigger)
+        print(' inputs configured, trigger level =', str(trigger), 'V, decimation =', str(decimation))
+        self.sampling_frequency = red.FS / red.ADC_decimation()
+        print(' resulting sampling frequency =', str(self.sampling_frequency / 1e6), 'MHz')
+
+        # outputs
+        red.align_channels_phase()
+        red.OUT_trigger()
+        red.OUT1_status('OFF')
+        red.OUT2_status('OFF')
+        print(' output generators triggered, phase aligned and turned off')
+
+        print('\nStarting UART communication')
+        red.UART_init()
+        print(' testing sensors')
+        print(' temperature =', str(red.temperature()), 'K')
+        print(' pressure =', str(red.pressure()), 'bar')
+
+        print('\nHaloscope initialised.')
+
     def analyse_run(self):
         return 0
 
@@ -107,7 +153,7 @@ class Haloscope(Experiment):
         return 0
 
 
-class FerromegnaticHaloscope(Experiment):
+class FerromagneticHaloscope(Experiment):
     def __init__(self, experiment_json):
         super().__init__(experiment_json)
         self.f0 = 0

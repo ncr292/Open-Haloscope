@@ -173,7 +173,7 @@ class VNA2_trace(MultiParameter):
         return magnitude, phase
 
 
-class getTemperature(Parameter):
+class GetTemperature(Parameter):
     ## Measures the temperature from the Arduino module
     # Notes: 
 
@@ -183,8 +183,8 @@ class getTemperature(Parameter):
     def get_raw(self):  
 
         # start UART communication
-        self._instrument.UART_init()
-        self._instrument.UART_setup()
+        #self._instrument.UART_init()
+        #self._instrument.UART_setup()
 
         # the Aruino is configured to return the pressure when prompted with a 'p'
         t = str( ord('t') )
@@ -192,6 +192,7 @@ class getTemperature(Parameter):
         # set the length of the message and send it, since it is a single letter the length is 1
         self._instrument.UART_data_length(1)
         self._instrument.UART_write(t)   
+        time.sleep(0.1)
         
         # set the length of the response, which is 7 bytes (e.g. 1023.51 = 7 characters) plus stop byte and new line
         self._instrument.UART_data_length(7)
@@ -206,13 +207,13 @@ class getTemperature(Parameter):
         t = float(t_string)
 
         # close UART communication
-        self._instrument.UART_release()
+        #self._instrument.UART_release()
 
         celsius_to_K = 273.15
         return t + celsius_to_K
 
 
-class getPressure(Parameter):
+class GetPressure(Parameter):
     ## Measures the temperature from the Arduino module
     # Notes: 
 
@@ -222,8 +223,8 @@ class getPressure(Parameter):
     def get_raw(self):  
 
         # start UART communication
-        self._instrument.UART_init()
-        self._instrument.UART_setup()
+        #self._instrument.UART_init()
+        #self._instrument.UART_setup()
 
         # the Aruino is configured to return the pressure when prompted with a 'p'
         p = str( ord('p') )
@@ -245,7 +246,7 @@ class getPressure(Parameter):
         p = float(p_string)
 
         # close UART communication
-        self._instrument.UART_release()
+        #self._instrument.UART_release()
 
         hPa_to_bar = 1e-3
         return hPa_to_bar*p
@@ -833,14 +834,14 @@ class Redpitaya(VisaInstrument):
 
         ## sensors data     
         self.add_parameter( 'temperature',
-                            parameter_class=getTemperature,
+                            parameter_class=GetTemperature,
                             unit='K',
                             label = 'Temperature',
                             vals=vals.Numbers(0, np.inf),
                             )
 
         self.add_parameter( 'pressure',
-                            parameter_class=getPressure,
+                            parameter_class=GetPressure,
                             unit='bar',
                             label = 'Pressure',
                             vals=vals.Numbers(0, np.inf),
@@ -1021,9 +1022,9 @@ class Redpitaya(VisaInstrument):
                 time.sleep(1.5 * BLOCK / self.FS)
                 data += self.ADC_read_N_after_trigger(channel, BLOCK)[1:-1] + ','
 
+                # increment the waveform number
                 self.number_of_waveforms(index)
                 trash = self.get_output()
-                #self.ADC_write_pointer(0)
 
                 # update the time which passed from the beginning of the run
                 t = time.time() - t0
@@ -1300,7 +1301,9 @@ class Redpitaya(VisaInstrument):
         return status_out
 
     def estimated_duty_cycle(self):
-        duty_cycle = self.number_of_waveforms() * (self.BUFFER_SIZE / self.FS * self.ADC_decimation())
+        # calculated instrument duty cycle (based on the previous run)
+        acquired_points = self.number_of_waveforms() * self.BUFFER_SIZE
+        estimated_points = self.acquisition_length() * self.FS / self.ADC_decimation()
 
-        return duty_cycle
+        return acquired_points / estimated_points
 
