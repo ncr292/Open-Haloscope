@@ -104,7 +104,7 @@ class VNA1_trace(MultiParameter):
         phase = np.zeros(number_of_points)
 
         # first turn on the ADC and the sources
-        self._instrument.ADC_data_format('BIN')
+        self._instrument.ADC_data_format('ASCII')
         self._instrument.ADC_trigger_level(0.0)
 
         self._instrument.OUT_trigger()
@@ -149,7 +149,7 @@ class VNA2_trace(MultiParameter):
         phase = np.zeros(number_of_points)
 
         # first turn on the ADC and the sources
-        self._instrument.ADC_data_format('BIN')
+        self._instrument.ADC_data_format('ASCII')
         self._instrument.ADC_trigger_level(0.0)
 
 
@@ -214,7 +214,7 @@ class GetTemperature(Parameter):
 
 
 class GetPressure(Parameter):
-    ## Measures the temperature from the Arduino module
+    ## Measures the pressure from the Arduino module
     # Notes: 
 
     def __init__(self, *args, **kwargs):
@@ -250,6 +250,85 @@ class GetPressure(Parameter):
 
         hPa_to_bar = 1e-3
         return hPa_to_bar*p
+
+
+class GetMagneticField(Parameter):
+    ## Measures the magnetic field on the Hall probe connected to the Arduino
+    # Notes: 
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def get_raw(self):  
+
+        # start UART communication
+        #self._instrument.UART_init()
+        #self._instrument.UART_setup()
+
+        # the Aruino is configured to return the pressure when prompted with a 'p'
+        b = str( ord('b') )
+
+        # set the length of the message and send it, since it is a single letter the length is 1
+        self._instrument.UART_data_length(1)
+        self._instrument.UART_write(b)   
+
+        # set the length of the response, which is 7 bytes (e.g. 1023.51 = 7 characters) plus stop byte and new line
+        self._instrument.UART_data_length(9)
+        b_string = self._instrument.UART_read() 
+
+        # format the response into a number
+        b_string = b_string[1:-1].split(',')
+        b_string = list(map(int, b_string[0:7]))
+        b_string = "".join( list(map(chr, b_string)))
+
+        # magnetic field
+        b = float(b_string)
+
+        # close UART communication
+        #self._instrument.UART_release()
+
+        pin_read_to_field = 5.0 / 1024 * 10 # the sensor's calibration is 10 V/T
+        offset = 23.14453125
+        return 1000 * (pin_read_to_field * b - offset) # mT
+
+
+class GetPhotoresistance(Parameter):
+    ## Measures the light on the photoresistance connected to the Arduino
+    # Notes: 
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def get_raw(self):  
+
+        # start UART communication
+        #self._instrument.UART_init()
+        #self._instrument.UART_setup()
+
+        # the Aruino is configured to return the pressure when prompted with a 'p'
+        l = str( ord('l') )
+
+        # set the length of the message and send it, since it is a single letter the length is 1
+        self._instrument.UART_data_length(1)
+        self._instrument.UART_write(l)   
+
+        # set the length of the response, which is 7 bytes (e.g. 1023.51 = 7 characters) plus stop byte and new line
+        self._instrument.UART_data_length(9)
+        l_string = self._instrument.UART_read() 
+
+        # format the response into a number
+        l_string = l_string[1:-1].split(',')
+        l_string = list(map(int, l_string[0:7]))
+        l_string = "".join( list(map(chr, l_string)))
+
+        # light
+        l = float(l_string)
+
+        # close UART communication
+        #self._instrument.UART_release()
+
+        pin_read_to_voltage = 5.0 / 1024
+        return pin_read_to_voltage * l
 
 
 class Redpitaya(VisaInstrument):
@@ -847,6 +926,20 @@ class Redpitaya(VisaInstrument):
                             vals=vals.Numbers(0, np.inf),
                             )
         
+        self.add_parameter( 'magnetic_field',
+                            parameter_class=GetMagneticField,
+                            unit='mT',
+                            label = 'Magnetic field',
+                            vals=vals.Numbers(-np.inf, np.inf),
+                            )
+
+        self.add_parameter( 'photoresistance',
+                            parameter_class=GetPhotoresistance,
+                            unit='Ohm',
+                            label = 'Light',
+                            vals=vals.Numbers(0, np.inf),
+                            )
+
         # good idea to call connect_message at the end of your constructor.
         # this calls the 'IDN' parameter that the base Instrument class creates 
         # for every instrument  which serves two purposes:
@@ -904,7 +997,6 @@ class Redpitaya(VisaInstrument):
         # Returns the output, which is useful to check for 'ERR!' messages
         return self.ask('OUTPUT:DATA?')
 
-
     def ADC_read_N_from_A(self, channel, size: int, pointer: int):
         # read N samples from the buffer of the Redpitaya starting from the pointer
 
@@ -939,7 +1031,10 @@ class Redpitaya(VisaInstrument):
         scpi_string = 'ACQ:SOUR' + str(channel) + ':DATA:OLD:N? ' + str(size)
         raw_data = self.ask(scpi_string)
 
-        return raw_data
+        data_string = np.array( raw_data[1:-1].split(',') )
+        data_line = data_string.astype(float)
+
+        return data_line
 
     def ADC_read_N_after_trigger_bin(self, channel, size: int):
         # read N binary samples from the buffer of the Redpitaya starting from the trigger
@@ -1124,7 +1219,8 @@ class Redpitaya(VisaInstrument):
         
         # this reduced the maximum duty cycle to 75%  
         time.sleep(1.5 * BLOCK / self.FS)
-        waveform = self.ADC_read_N_after_trigger_bin(channel, BLOCK)
+        waveform = self.ADC_read_N_after_trigger(channel, BLOCK)
+        #print(waveform)
 
         self.ADC_stop()
 

@@ -134,8 +134,10 @@ class FermionicHaloscope(Experiment):
         print(' testing sensors')
         print(' temperature =', str(red.temperature()), 'K')
         print(' pressure =', str(red.pressure()), 'bar')
+        print(' magnetic field =', str(red.magnetic_field()), 'mT')
+        print(' photoresistance =', str(red.photoresistance()), 'Ohm')
 
-        print('\nHaloscope initialised.')
+        print('\nHaloscope initialised. Good luck, dark matter hunter.')
 
     def analyse_run(self):
         return 0

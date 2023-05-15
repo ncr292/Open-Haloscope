@@ -7,6 +7,10 @@
 #define BMP_MOSI (11)
 #define BMP_CS   (10)
 
+int LightPin = 0;
+int BFieldPin = 1;
+//float PinToField = 5.0/1024 * 10; // sensitivity of 1mv/G = 10 V / T
+
 //Adafruit_BMP280 bmp; // I2C
 Adafruit_BMP280 bmp(BMP_CS, BMP_MOSI, BMP_MISO,  BMP_SCK); // SPI
 
@@ -28,8 +32,8 @@ void loop() {
 
     if (data_rcvd == 'p') Serial.println(bmp.readPressure()); // return pressure
     if (data_rcvd == 't') Serial.println(bmp.readTemperature()); // return temperature
-    //if (data_rcvd == 'b') Serial.println(bmp.readMagneticField()); // return B-field
-    //if (data_rcvd == 'l') Serial.println(readLight()); // return temperature
+    if (data_rcvd == 'l') Serial.println(analogRead(LightPin)); // return light
+    if (data_rcvd == 'b') Serial.println(analogRead(BFieldPin)); // return B-field
 
     digitalWrite(LED_BUILTIN, HIGH); // turn on the led 
     delay(100);
