@@ -14,3 +14,5 @@
  ### The experiment
   The physical phenomenon which is sensitive to the presence of dark matter is a magnetic resonance, and in particular its frequency.
   In a few words, the experiments monitors the MHz-frequency resonances of two perpendicular [ferrimagnetic rods](https://fr.rs-online.com/web/p/noyaux-de-ferrites/4673983), using a [Red Pitaya](https://redpitaya.readthedocs.io/en/latest/index.html) board. In addition, several other physical parameters are measure with the aid of an [Arduino](https://www.arduino.cc/) and some sensors.
+
+![alt text]([https://github.com/[username]/[reponame]/blob/[branch]/image.jpg?raw=true](https://github.com/ncr292/Open-Haloscope/blob/main/lib/open-haloscope.svg?raw=true))
