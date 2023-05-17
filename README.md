@@ -3,7 +3,7 @@
  
  Axions are an hypothetical particles which extend the Standard Model of particle physics and, if they exist, form dark matter.
  The search for axions is performed with earth-based experiments called haloscopes from the dark matter halo of the Milky Way.
- To build an haloscope, one normally needs a partcile physics laboratory, a team of physicists and engineers, and a some million euros.
+ To build an haloscope, one normally needs a partcile physics laboratory, a team of physicists and engineers, and millions of euros.
  
  This project implements a fermionic axion interferometer based on the axion-spin interaction. Conversely to usual haloscopes, it can be built by anybody, in a garage, and at a cost of a two to three hundred euros. A complete experimental setup allows for characterisation measurements, data acquisition and processing, data analysis, and eventually leads to investigating the existence of dark matter axions[^1].
  
