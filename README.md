@@ -28,5 +28,5 @@ The yellow line is where theorists expect the axion to show up, and the green ar
 
 This setup works, but can be havily modified and improved, for example by using different hardware or working on the software side side to advance the data analysis. The space for user creativity is wide, and hopefully it can be a fertile ground for ideas.
 
-[^1]: In case this is not enough, this same experiment is probably sensitive to gravitational waves as well.
+[^1]: In case this is not enough, this same experiment is probably [sensitive to gravitational waves](https://arxiv.org/abs/gr-qc/0311030) as well.
 [^2]: Named after a [flightless bird](https://en.wikipedia.org/wiki/Flightless_bird).
