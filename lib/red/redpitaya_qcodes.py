@@ -333,6 +333,7 @@ class GetPhotoresistance(Parameter):
 
 class Redpitaya(VisaInstrument):
     ## main driver
+    # a general issue is the triggering in binary mode
     def __init__(self, name, address, **kwargs):
         super().__init__(name, address, terminator='\r\n', **kwargs)
         
