@@ -7,7 +7,8 @@
  
  This project implements a fermionic axion interferometer based on the axion-spin interaction. Conversely to usual haloscopes, it can be built by anybody, in a garage, and at a cost of a two to three hundred euros. A complete experimental setup allows for characterisation measurements, data acquisition and processing, data analysis, and eventually leads to investigating the existence of dark matter axions[^1].
  
- For more detailed information, building instructions and so on, please refer to the wiki of the project.
+ A quick summary of the experiment is hereafter.
+ For more detailed information, building instructions, and notes for number crunchers, please refer to the wiki of the project.
  
  ---
  
