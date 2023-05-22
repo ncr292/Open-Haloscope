@@ -331,6 +331,48 @@ class GetPhotoresistance(Parameter):
         return pin_read_to_voltage * l
 
 
+class GetAcceleration(Parameter):
+    ## Measures the acceleration from the Arduino module
+    # Notes: 
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def get_raw(self):  
+
+        # start UART communication
+        #self._instrument.UART_init()
+        #self._instrument.UART_setup()
+
+        # the Aruino is configured to return the pressure when prompted with a 'x', 'y' or 'z'
+        ain = ['x', 'y', 'z']
+        aout = np.zeros(3)
+
+        for ind in range(3):
+            a = str( ord(ain[ind]) )
+
+            # set the length of the message and send it, since it is a single letter the length is 1
+            self._instrument.UART_data_length(1)
+            self._instrument.UART_write(a)   
+
+            # set the length of the response, which is 7 bytes (e.g. 1023.51 = 7 characters) plus stop byte and new line
+            self._instrument.UART_data_length(9)
+            a_string = self._instrument.UART_read() 
+
+            # format the response into a number
+            a_string = a_string[1:-1].split(',')
+            a_string = list(map(int, a_string[0:7]))
+            a_string = "".join( list(map(chr, a_string)))
+
+            # pressure
+            aout[ind] = float(a_string)
+
+        # close UART communication
+        #self._instrument.UART_release()
+
+        return aout[0], aout[1], aout[2]
+
+
 class Redpitaya(VisaInstrument):
     ## main driver
     # a general issue is the triggering in binary mode
@@ -936,6 +978,13 @@ class Redpitaya(VisaInstrument):
 
         self.add_parameter( 'photoresistance',
                             parameter_class=GetPhotoresistance,
+                            unit='Ohm',
+                            label = 'Light',
+                            vals=vals.Numbers(0, np.inf),
+                            )
+
+        self.add_parameter( 'acceleration',
+                            parameter_class=GetAcceleration,
                             unit='Ohm',
                             label = 'Light',
                             vals=vals.Numbers(0, np.inf),

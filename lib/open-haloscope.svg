@@ -29,9 +29,9 @@
      borderopacity="1.0"
      inkscape:pageopacity="0.0"
      inkscape:pageshadow="2"
-     inkscape:zoom="0.98994949"
-     inkscape:cx="251.7374"
-     inkscape:cy="175.77216"
+     inkscape:zoom="1.979899"
+     inkscape:cx="194.79533"
+     inkscape:cy="102.63835"
      inkscape:document-units="mm"
      inkscape:current-layer="g6398"
      showgrid="false"
@@ -10732,6 +10732,15 @@
          height="2.3002226"
          width="1.0036515"
          id="rect6092-15-8"
+         style="fill:#806600;fill-rule:evenodd;stroke-width:0.34758455" />
+      <rect
+         transform="rotate(-90)"
+         ry="0.053024329"
+         y="123.93226"
+         x="-93.035789"
+         height="2.3002226"
+         width="1.0036515"
+         id="rect6092-15-7"
          style="fill:#806600;fill-rule:evenodd;stroke-width:0.34758455" />
     </g>
     <g

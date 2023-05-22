@@ -136,6 +136,7 @@ class FermionicHaloscope(Experiment):
         print(' pressure =', str(red.pressure()), 'bar')
         print(' magnetic field =', str(red.magnetic_field()), 'mT')
         print(' photoresistance =', str(red.photoresistance()), 'Ohm')
+        print(' acceleration =', str(red.acceleration()), 'm/s^2')
 
         print('\nHaloscope initialised. Good luck, dark matter hunter.')
 

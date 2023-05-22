@@ -16,7 +16,7 @@
   The physical phenomenon which is sensitive to the presence of dark matter is a magnetic resonance, and in particular its frequency.
   In a few words, the experiments monitors the MHz-frequency resonances of two perpendicular [ferrimagnetic rods](https://fr.rs-online.com/web/p/noyaux-de-ferrites/4673983), using a [Red Pitaya](https://redpitaya.readthedocs.io/en/latest/index.html) board. In addition, several other physical parameters are measured with the aid of an [Arduino](https://www.arduino.cc/) and some sensors.
   
-<img src="lib/open-haloscope.png" width="60%" height="60%"/>
+<img src="lib/open-haloscope.png" width="70%" height="70%"/>
 
 The experiment is operated using [Jupyter notebooks](https://jupyter.org/), data acquisition and storage is handled using [QCodes](https://qcodes.github.io/), and the data analysis is performed in notebooks as well. 
 This repository provides the tools to compare the measurements to the expected effects of an axionic dark matter field, therefore allowing to detect or exclude the presence of dark matter.
