@@ -35,8 +35,14 @@ class OHUtils():
         return haloscope_json
 
 
+    def get_runs_folder():
+        dirname = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+        data_folder = 'data'
+        runs_folder = 'runs'
+        data_path = os.path.join(dirname, data_folder, runs_folder)
 
+        return data_path
 
 
 

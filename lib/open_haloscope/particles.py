@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-# Main file with the varius tools used in the Open Haloscope project
+# Particles.
+# This is the place to add all the properties of particles which can be searched with the haloscope.
+# The properties can be used to estimate the sensitivity, extract upper limits, get experimentally 
+# relevant numbers and so on.
+#
 # Written by Nicolò Crescini
 
 import numpy as np

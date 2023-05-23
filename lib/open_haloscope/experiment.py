@@ -1,13 +1,23 @@
 # -*- coding: utf-8 -*-
-# Main file with the varius tools used in the Open Haloscope project
+# Experiment.
+# Here one can defined different types of experiments which search for the particles of particles.py.
+# In general, these classes contain methods and functions which are the bread and butter of experimentalists.
+# If a function is general purpose, like a lock-in amplifier, it is good to add it directly to the Experiment() 
+# class, as it will be inherited by all the other experiments. On the other hand, if a function is specific of
+# one experiment, or haloscope, then it is better to keep it within the corresponding experiment class. For example
+# the function to analyse a run, being a specific process which depends on the haloscope, is only a function of a 
+# specific experiment class,  like FermionicHaloscope().
+#
 # Written by Nicolò Crescini
 
+import os
 import json
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import butter, sosfilt
 from scipy import constants as c
-
+from datetime import datetime
+from .utils import OHUtils
 
 class Experiment():
     def __init__(self, experiment_json: str):
@@ -23,7 +33,6 @@ class Experiment():
         with open(experiment_json) as json_file:
             self.experiment_parameters = json.load(json_file)
 
-
     def mixer(self, signal_a, signal_b):
         # mixing an input signal with a local oscillator
         if len(signal_a) == len(signal_b):
@@ -33,14 +42,7 @@ class Experiment():
 
         return signal_c
 
-
-    def lockin(self, 
-               signal, 
-               reference_frequency, 
-               sampling_frequency,
-               filter_tau = 1e-3, 
-               filter_order = 5
-               ):
+    def lockin(self, signal, reference_frequency, sampling_frequency, filter_tau = 1e-3, filter_order = 5):
 
         # lock-in amplifier
         points = len(signal)
@@ -61,6 +63,10 @@ class Experiment():
         
         return x + 1j*y
 
+    # useful functions
+    def lorentzian(self, x, x0, a, gamma):
+        return a * gamma**2 / ( gamma**2 + ( x - x0 )**2)
+
 
 class FermionicHaloscope(Experiment):
     def __init__(self, experiment_json):
@@ -68,6 +74,7 @@ class FermionicHaloscope(Experiment):
 
         self.instruments = []
         self.sampling_frequency
+        self.data_path = ''
         self._initialiseExperiment(experiment_json)
         
         self.sensitivity_parameters = {"f0": self.experiment_parameters['f0'],       # frequency of the resonance 
@@ -93,12 +100,7 @@ class FermionicHaloscope(Experiment):
         b = 2 * eta * B0 / (np.pi * Q) * (An / Ap)
         return b
 
-    def initialise_haloscope(self, 
-                             instruments_list,
-                             decimation = 4,
-                             trigger = 0.0,
-                             ):
-
+    def initialise_haloscope(self, instruments_list, decimation = 4, trigger = 0.0):
         ## initialisation of the experimental apparatus
         # here, one needs to add all the intruments used in the setup, which will
         # then be used to set-up the experiment before starting the operation.
@@ -134,11 +136,36 @@ class FermionicHaloscope(Experiment):
         print(' testing sensors')
         print(' temperature =', str(red.temperature()), 'K')
         print(' pressure =', str(red.pressure()), 'bar')
-        print(' magnetic field =', str(red.magnetic_field()), 'mT')
-        print(' photoresistance =', str(red.photoresistance()), 'Ohm')
+        print(' magnetic field =', str(red.magnetic_field()), 'V')
+        print(' photoresistance =', str(red.photoresistance()), 'V')
         print(' acceleration =', str(red.acceleration()), 'm/s^2')
 
+        print('\nConfiguring data storage.')
+        self.data_path += os.path.join(OHUtils.get_runs_folder(), datetime.today().strftime('%Y-%m-%d')) 
+        if not os.path.exists(self.data_path):
+            os.makedirs(self.data_path)
+        print(' data are stored in', self.data_path)
+
         print('\nHaloscope initialised. Good luck, dark matter hunter.')
+
+    def characterise(self, db_name = 'experiment_characterisation.db', monitoring_time = 30):
+        # launch a characterisation measurement of the haloscope, which consists in a transmission measurement
+        # of its two channels, and some time to monitor its sensors.
+        
+        
+        
+        print('Done.')
+        pass
+
+    def prepare_for_operation(self):
+
+        print('\nHaloscope ready for research.')
+        return 0
+
+    def run(self):
+
+        print('\nRun completed.')
+        return 0
 
     def analyse_run(self):
         return 0

@@ -4,12 +4,13 @@
 
 import time
 import binascii
+from typing import Tuple
 
 import numpy as np
 from scipy.signal import periodogram, butter, sosfilt
 import matplotlib.pyplot as plt
 
-from tqdm import tqdm
+from tqdm import tqdm, trange 
 
 from qcodes import validators as vals
 from qcodes.instrument import ( Instrument,
@@ -20,7 +21,7 @@ from qcodes.instrument import ( Instrument,
                                 VisaInstrument,
                                 )
 
-from qcodes.instrument.parameter import ParameterWithSetpoints, Parameter
+from qcodes.instrument.parameter import ParameterWithSetpoints, Parameter, ParamRawDataType
 
 
 class GeneratedSetPoints(Parameter):
@@ -84,7 +85,7 @@ class IN2_data(ParameterWithSetpoints):
         return data
 
 
-class VNA1_trace(MultiParameter):
+class TX1_trace(ParameterWithSetpoints):
     ## Formats and outputs the raw data acquired by the Redpitaya
     # Note: one needs to set the decimation before using the VNA, so to use a 
     # large decimation for the low frequency traces and viceversa.
@@ -93,6 +94,103 @@ class VNA1_trace(MultiParameter):
         super().__init__(*args, **kwargs)
 
     def get_raw(self):
+        start_frequency = self._instrument.vna_start()
+        stop_frequency = self._instrument.vna_stop()
+        number_of_points = self._instrument.vna_points()
+        number_of_averages = self._instrument.vna_averages()
+
+        # initalise the trace array
+        frequency = np.linspace(start_frequency, stop_frequency, number_of_points)
+        magnitude = np.zeros(number_of_points)
+        #phase = np.zeros(number_of_points)
+
+        # first turn on the ADC and the sources
+        self._instrument.ADC_data_format('ASCII')
+        self._instrument.ADC_trigger_level(0.0)
+
+        self._instrument.OUT_trigger()
+        self._instrument.OUT1_status('ON')
+
+        # rest
+        time.sleep(0.2)
+
+        # then measure the points from channel 1
+        with tqdm(total = number_of_averages * number_of_points) as pbar:
+            for avg in range(number_of_averages):
+                for point in range(number_of_points):
+                    m0, p0 = self._instrument.spectrscopy(1, frequency[point])
+                    magnitude[point] += m0
+                    #phase[point] += p0
+                    # update progress bar
+                    pbar.update(1)
+
+        magnitude = magnitude / number_of_averages
+        #phase = phase / number_of_averages
+
+        # eventually turn off the source
+        self._instrument.OUT1_status('OFF')
+        
+        return magnitude
+
+
+class TX2_trace(ParameterWithSetpoints):
+    ## Formats and outputs the raw data acquired by the Redpitaya
+    # Note: one needs to set the decimation before using the VNA, so to use a 
+    # large decimation for the low frequency traces and viceversa.
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def get_raw(self):
+        start_frequency = self._instrument.vna_start()
+        stop_frequency = self._instrument.vna_stop()
+        number_of_points = self._instrument.vna_points()
+        number_of_averages = self._instrument.vna_averages()
+
+        # initalise the trace array
+        frequency = np.linspace(start_frequency, stop_frequency, number_of_points)
+        magnitude = np.zeros(number_of_points)
+        #phase = np.zeros(number_of_points)
+
+        # first turn on the ADC and the sources
+        self._instrument.ADC_data_format('ASCII')
+        self._instrument.ADC_trigger_level(0.0)
+
+
+        self._instrument.OUT_trigger()
+        self._instrument.OUT2_status('ON')
+
+        # then measure the points from channel 2
+        with tqdm(total = number_of_averages * number_of_points) as pbar:
+            for avg in range(number_of_averages):
+                for point in range(number_of_points):
+                    #time.sleep(0.2)
+                    m0, p0 = self._instrument.spectrscopy(2, frequency[point])
+                    magnitude[point] += m0
+                    #phase[point] += p0
+                    # update progress bar
+                    pbar.update(1)
+
+        magnitude = magnitude / number_of_averages
+        #phase = phase / number_of_averages
+
+        # eventually turn off the sources
+        self._instrument.OUT2_status('OFF')
+        
+        return magnitude
+
+
+class VNA1_trace(MultiParameter):
+    ## Formats and outputs the raw data acquired by the Redpitaya
+    # Note: one needs to set the decimation before using the VNA, so to use a 
+    # large decimation for the low frequency traces and viceversa.
+    #
+    # Right now this is not working, as it is not possible to consistently measure the phase.
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def get_raw(self) -> Tuple[ParamRawDataType, ...]:
         start_frequency = self._instrument.vna_start()
         stop_frequency = self._instrument.vna_stop()
         number_of_points = self._instrument.vna_points()
@@ -114,11 +212,14 @@ class VNA1_trace(MultiParameter):
         time.sleep(0.2)
 
         # then measure the points from channel 1
-        for avg in range(number_of_averages):
-            for point in tqdm(range(number_of_points)):
-                m0, p0 = self._instrument.spectrscopy(1, frequency[point])
-                magnitude[point] += m0
-                phase[point] += p0
+        with tqdm(total = number_of_averages * number_of_points) as pbar:
+            for avg in range(number_of_averages):
+                for point in range(number_of_points):
+                    m0, p0 = self._instrument.spectrscopy(1, frequency[point])
+                    magnitude[point] += m0
+                    phase[point] += p0
+                    # update progress bar
+                    pbar.update(1)
 
         magnitude = magnitude / number_of_averages
         phase = phase / number_of_averages
@@ -133,6 +234,8 @@ class VNA2_trace(MultiParameter):
     ## Formats and outputs the raw data acquired by the Redpitaya
     # Note: one needs to set the decimation before using the VNA, so to use a 
     # large decimation for the low frequency traces and viceversa.
+    #
+    # Right now this is not working, as it is not possible to consistently measure the phase.
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -157,12 +260,15 @@ class VNA2_trace(MultiParameter):
         self._instrument.OUT2_status('ON')
 
         # then measure the points from channel 2
-        for avg in range(number_of_averages):
-            for point in tqdm(range(number_of_points)):
-                #time.sleep(0.2)
-                m0, p0 = self._instrument.spectrscopy(2, frequency[point])
-                magnitude[point] += m0
-                phase[point] += p0
+        with tqdm(total = number_of_averages * number_of_points) as pbar:
+            for avg in range(number_of_averages):
+                for point in range(number_of_points):
+                    #time.sleep(0.2)
+                    m0, p0 = self._instrument.spectrscopy(2, frequency[point])
+                    magnitude[point] += m0
+                    phase[point] += p0
+                    # update progress bar
+                    pbar.update(1)
 
         magnitude = magnitude / number_of_averages
         phase = phase / number_of_averages
@@ -282,14 +388,13 @@ class GetMagneticField(Parameter):
         b_string = "".join( list(map(chr, b_string)))
 
         # magnetic field
-        b = float(b_string)
+        pin_read_to_voltage = 5.0 / 1024
+        b = float(b_string) * pin_read_to_voltage
 
         # close UART communication
         #self._instrument.UART_release()
 
-        pin_read_to_field = 5.0 / 1024 * 10 # the sensor's calibration is 10 V/T
-        offset = 23.14453125
-        return 1000 * (pin_read_to_field * b - offset) # mT
+        return b # V
 
 
 class GetPhotoresistance(Parameter):
@@ -937,21 +1042,42 @@ class Redpitaya(VisaInstrument):
                             parameter_class=VNA1_trace,
                             names = ('VNA1_mag', 'VNA1_phase'),
                             units=('dB', 'rad'),
+                            setpoint_units=(("Hz",), ("Hz",)),
                             labels=('Channel 1 magnitude', 'Channel 1 phase'),
                             setpoints=((self.frequency_axis(),), (self.frequency_axis(),)),
                             vals=vals.Arrays(shape=((self.vna_points.get_latest,), (self.vna_points.get_latest,))),
                             shapes=((self.vna_points(),), (self.vna_points(),),),
                             )
 
+
         # trace of channel 2
         self.add_parameter( 'VNA2',
                             parameter_class=VNA2_trace,
                             names = ('VNA2_mag', 'VNA2_phase'),
                             units=('dB', 'rad'),
+                            setpoint_units=(("Hz",), ("Hz",)),
                             labels=('Channel 2 magnitude', 'Channel 2 phase'),
                             setpoints=((self.frequency_axis(),), (self.frequency_axis(),)),
                             vals=vals.Arrays(shape=((self.vna_points.get_latest,), (self.vna_points.get_latest,))),
                             shapes=((self.vna_points(),), (self.vna_points(),),),
+                            )
+
+        # transmission of channel 1
+        self.add_parameter( 'TX1',
+                            parameter_class=TX1_trace,
+                            unit='a.u.',
+                            label='Channel 1 transmission',
+                            vals=vals.Arrays(shape=(self.vna_points.get_latest,)),
+                            setpoints=(self.frequency_axis,),
+                            )
+
+        # transmission of channel 2
+        self.add_parameter( 'TX2',
+                            parameter_class=TX2_trace,
+                            unit='a.u.',
+                            label='Channel 2 transmission',
+                            vals=vals.Arrays(shape=(self.vna_points.get_latest,)),
+                            setpoints=(self.frequency_axis,),
                             )
 
         ## sensors data     
