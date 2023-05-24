@@ -17,7 +17,26 @@ import matplotlib.pyplot as plt
 from scipy.signal import butter, sosfilt
 from scipy import constants as c
 from datetime import datetime
+
+# open haloscope functions
 from .utils import OHUtils
+
+# qcodes functions
+import qcodes as qc
+from qcodes.dataset import (do0d,
+                            do1d,
+                            Measurement,
+                            experiments,
+                            initialise_or_create_database_at,
+                            load_or_create_experiment,
+                            load_by_run_spec,
+                            plot_dataset
+                            )
+
+# qcodes dummy instrument for time
+from qcodes.tests.instrument_mocks import DummyInstrument
+chrono = DummyInstrument('chrono', gates=['t0', 't1'])
+
 
 class Experiment():
     def __init__(self, experiment_json: str):
@@ -74,6 +93,7 @@ class FermionicHaloscope(Experiment):
 
         self.instruments = []
         self.sampling_frequency
+        self.station = None
         self.data_path = ''
         self._initialiseExperiment(experiment_json)
         
@@ -106,6 +126,7 @@ class FermionicHaloscope(Experiment):
         # then be used to set-up the experiment before starting the operation.
 
         print('Loading instrumentation')
+
         for instrument in instruments_list:
             self.instruments.append(instrument)
             if instrument.name == 'redpitaya': red = instrument
@@ -146,14 +167,41 @@ class FermionicHaloscope(Experiment):
             os.makedirs(self.data_path)
         print(' data are stored in', self.data_path)
 
+        # QCodes configuration
+        self.station = qc.Station()
+        for instrument in instruments_list:
+                    self.station.add_component(instrument)  
+        self.station.add_component(chrono)
+        print(' QCodes station and database configured')
+
         print('\nHaloscope initialised. Good luck, dark matter hunter.')
 
-    def characterise(self, db_name = 'experiment_characterisation.db', monitoring_time = 30):
+    def characterise(self, db_name = 'experiment_characterisation.db', monitoring_time = 30, time_points = 301):
         # launch a characterisation measurement of the haloscope, which consists in a transmission measurement
         # of its two channels, and some time to monitor its sensors.
-        
-        
-        
+
+        # create a database which contains the characterisation measurements
+        db_path = os.path.join(self.data_path, db_name)
+        initialise_or_create_database_at(db_path)
+
+        exp = load_or_create_experiment(experiment_name="kakapo", sample_name="characterisation")
+
+        # measure s21 of both channels 
+        meas = Measurement(exp=exp, station=self.station, name='spectroscopy')
+
+
+        # check sensors stability
+        temperature = self.station.redpitaya.temperature # need to add an if to check that the instrument is there
+        pressure = self.station.redpitaya.pressure
+        magnetic_field = self.station.redpitaya.magnetic_field
+        photoresistance = self.station.redpitaya.photoresistance
+        acceleration = self.station.redpitaya.acceleration
+
+        meas = Measurement(exp=exp, station=self.station, name='temperture')
+        do1d(chrono.t0, 0, monitoring_time, time_points, monitoring_time/time_points, temperature)
+
+
+
         print('Done.')
         pass
 

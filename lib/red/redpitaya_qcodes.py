@@ -581,6 +581,7 @@ class Redpitaya(VisaInstrument):
 
         # SPI communication
         # handling parameters
+        """
         self.add_parameter( name='SPI_mode',
                             label='Mode for SPI.',
                             vals=vals.Enum('LISL', 'LIST', 'HISL', 'HIST'),
@@ -632,8 +633,7 @@ class Redpitaya(VisaInstrument):
                             set_cmd='I2C:FMODE ' + '{}',
                             get_cmd='I2C:FMODE?'
                             )
-
-
+        """
 
 
         ## signal generators
@@ -1097,22 +1097,22 @@ class Redpitaya(VisaInstrument):
         
         self.add_parameter( 'magnetic_field',
                             parameter_class=GetMagneticField,
-                            unit='mT',
+                            unit='V',
                             label = 'Magnetic field',
                             vals=vals.Numbers(-np.inf, np.inf),
                             )
 
         self.add_parameter( 'photoresistance',
                             parameter_class=GetPhotoresistance,
-                            unit='Ohm',
+                            unit='V',
                             label = 'Light',
                             vals=vals.Numbers(0, np.inf),
                             )
 
         self.add_parameter( 'acceleration',
                             parameter_class=GetAcceleration,
-                            unit='Ohm',
-                            label = 'Light',
+                            unit='m/s^2',
+                            label = 'Acceleration',
                             vals=vals.Numbers(0, np.inf),
                             )
 
@@ -1428,6 +1428,7 @@ class Redpitaya(VisaInstrument):
         # releases all used resources
         self.write('UART:RELEASE')
 
+    """
     ## SPI protocol
     def SPI_init(self):
         # initializes the API for working with SPI
@@ -1541,6 +1542,7 @@ class Redpitaya(VisaInstrument):
         print('I2C:DEV' + str(addr) + ' "' + path + '"')
         self.write('I2C:DEV' + str(addr) + ' "' + path + '"')
 
+    """
 
     ## helpers
     # useful functions
