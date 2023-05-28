@@ -1,5 +1,7 @@
 
 *.pyc
+*.db
+*.db-shm
+*.db-wal
 .ipynb_checkpoints
 .gitattributes
-.gitignore

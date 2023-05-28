@@ -97,6 +97,7 @@ class FermionicHaloscope(Experiment):
         self.data_path = ''
         self._initialiseExperiment(experiment_json)
         
+        self.haloscope_name = self.experiment_parameters['haloscope_name']
         self.sensitivity_parameters = {"f0": self.experiment_parameters['f0'],       # frequency of the resonance 
                                        "Q": self.experiment_parameters['Q'],         # quality factor of the resonance
                                        "An": self.experiment_parameters['An'],       # amplitude/rt(Hz) of the noise
@@ -176,34 +177,53 @@ class FermionicHaloscope(Experiment):
 
         print('\nHaloscope initialised. Good luck, dark matter hunter.')
 
-    def characterise(self, db_name = 'experiment_characterisation.db', monitoring_time = 30, time_points = 301):
+    def characterise(self, db_name = 'experiment_characterisation.db', monitoring_time = 30, time_points = 61, start_frequency=2e6, stop_frequency=10e6, frequency_points=101, rbw=10e3, probe_power=0.001, averages=2):
         # launch a characterisation measurement of the haloscope, which consists in a transmission measurement
         # of its two channels, and some time to monitor its sensors.
+
+        print('Characterisation data')
 
         # create a database which contains the characterisation measurements
         db_path = os.path.join(self.data_path, db_name)
         initialise_or_create_database_at(db_path)
+        print(' characterisation database created in ', self.data_path)
 
-        exp = load_or_create_experiment(experiment_name="kakapo", sample_name="characterisation")
+        exp = load_or_create_experiment(experiment_name=self.haloscope_name, sample_name="characterisation")
 
         # measure s21 of both channels 
+        print('\nInitiating spectroscopy in the span', str(start_frequency/1e6), 'to', str(stop_frequency/1e6), 'MHz.')
         meas = Measurement(exp=exp, station=self.station, name='spectroscopy')
 
+        self.station.redpitaya.vna_start(start_frequency)
+        self.station.redpitaya.vna_stop(stop_frequency)
+        self.station.redpitaya.vna_points(frequency_points)
+        self.station.redpitaya.vna_rbw(rbw)
+
+        self.station.redpitaya.vna_amplitude(probe_power)
+        self.station.redpitaya.vna_averages(averages)
+
+        print(' channel 1')
+        do0d(self.station.redpitaya.TX1);
+        print(' channel 2')
+        do0d(self.station.redpitaya.TX2);
 
         # check sensors stability
-        temperature = self.station.redpitaya.temperature # need to add an if to check that the instrument is there
-        pressure = self.station.redpitaya.pressure
-        magnetic_field = self.station.redpitaya.magnetic_field
-        photoresistance = self.station.redpitaya.photoresistance
-        acceleration = self.station.redpitaya.acceleration
+        print('\nInitiating sensors stability check for', str(monitoring_time), 's')
+        meas = Measurement(exp=exp, station=self.station, name='sensors')
 
-        meas = Measurement(exp=exp, station=self.station, name='temperture')
-        do1d(chrono.t0, 0, monitoring_time, time_points, monitoring_time/time_points, temperature)
+        print(' temperature')
+        do1d(chrono.t0, 0, monitoring_time, time_points, monitoring_time/time_points, self.station.redpitaya.temperature);
+        print(' pressure')
+        do1d(chrono.t0, 0, monitoring_time, time_points, monitoring_time/time_points, self.station.redpitaya.pressure);
+        print(' magnetic_field')
+        do1d(chrono.t0, 0, monitoring_time, time_points, monitoring_time/time_points, self.station.redpitaya.magnetic_field);
+        print(' photoresistance')
+        do1d(chrono.t0, 0, monitoring_time, time_points, monitoring_time/time_points, self.station.redpitaya.photoresistance);
+        #print(' acceleration')
+        #do1d(chrono.t0, 0, monitoring_time, time_points, monitoring_time/time_points, self.station.redpitaya.acceleration)
 
+        print('\nHaloscope parameters acquired.')
 
-
-        print('Done.')
-        pass
 
     def prepare_for_operation(self):
 
