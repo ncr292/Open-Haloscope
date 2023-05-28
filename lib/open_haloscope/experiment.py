@@ -43,6 +43,8 @@ class Experiment():
         # This is the experiment class, it has all the experimental parameters
         self.property = 0
         self.sampling_frequency = 125e6
+        self.buffer_length = 2**14
+        self.station = None        
         self._initialiseExperiment(experiment_json)
 
     def _initialiseExperiment(self, experiment_json):
@@ -92,8 +94,6 @@ class FermionicHaloscope(Experiment):
         super().__init__(experiment_json)
 
         self.instruments = []
-        self.sampling_frequency
-        self.station = None
         self.data_path = ''
         self._initialiseExperiment(experiment_json)
         
@@ -143,7 +143,9 @@ class FermionicHaloscope(Experiment):
         red.ADC_trigger_level(trigger)
         print(' inputs configured, trigger level =', str(trigger), 'V, decimation =', str(decimation))
         self.sampling_frequency = red.FS / red.ADC_decimation()
+        self.buffer_length = red.buffer_length
         print(' resulting sampling frequency =', str(self.sampling_frequency / 1e6), 'MHz')
+        print(' buffer length =', str(self.buffer_length))
 
         # outputs
         red.align_channels_phase()
@@ -215,7 +217,51 @@ class FermionicHaloscope(Experiment):
         print('\nRun completed.')
         return 0
 
-    def analyse_run(self):
+    def generate_simulated_run_data(self, f1=5e6, a1=1, f2=6e6, a2=1, phase_noise=1e-8, amplitude_noise=1e-5, number_of_traces=1000, axion_signal=True, aa=1e-8, fa=2e3, common_noise_frequency = 1e3, common_noise_amplitude = 1e-5):
+        # This function generates fake data which look like the ones of a real experimental run, it can be 
+        # used to test the analysis routines with different parameters. One can add the axion signal with specific
+        # frequency and amplitude (only applied on data1 for simplicity), and there is a common noise to evaluate
+        # its rejection. 
+
+        fs = self.sampling_frequency
+        trace_length = self.buffer_length
+
+        t = np.linspace(0,trace_length / fs, trace_length)
+
+        data1 = np.zeros((trace_length, number_of_traces))
+        data2 = np.zeros((trace_length, number_of_traces))
+
+        # axionic signal which can go in data1
+        axion = aa * np.sin(2*np.pi * fa * t)
+
+        # common noise
+        common = common_noise_amplitude * np.sin(2*np.pi * common_noise_frequency * t)
+
+
+        for i in range(number_of_traces):
+
+            # noise
+            amplitude_noise_trace = np.random.normal(scale = amplitude_noise, size = trace_length)
+            phase_noise_trace = np.random.normal(scale = phase_noise, size = trace_length)
+
+            # channel 1
+            if axion_signal == True:
+                data1[:,i] = a1 * np.sin(2*np.pi*f1 * t + 2*np.pi * np.random.uniform() + axion + phase_noise_trace + common) + amplitude_noise_trace
+            else:
+                data1[:,i] = a1 * np.sin(2*np.pi*f1 * t + 2*np.pi * np.random.uniform() + phase_noise_trace + common) + amplitude_noise_trace
+
+            # channel 2
+            data2[:,i] = a2 * np.sin(2*np.pi*f2 * t + 2*np.pi * np.random.uniform() + phase_noise_trace + common) + amplitude_noise_trace
+
+
+        return t, np.rot90(data1), np.rot90(data2)
+
+    def analyse_run(self, data1, data2):
+        # Simple analysis routine to extract the limit on the effective magnetic field starting from the run data
+        # of the fermionic interferometer.
+
+
+
         return 0
 
 
