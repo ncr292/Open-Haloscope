@@ -1,9 +1,12 @@
-
 {
     "_parameters_Kakapo": "Parameters used in the fermionic haloscope Kakapo",
     "haloscope_name": "kakapo",
-    "f0": 5e6,
+    "f0": 5.5e6,
     "Q": 100,
+    "f1": 5.0e6,
+    "k1": 100e3,
+    "f2": 6.0e6,
+    "k2": 100e3,
     "An": 1e-8,
     "Ap": 1e0,
     "beta1": 1,

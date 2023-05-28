@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 # Main file with the varius tools used in the Open Haloscope project
-# Written by Nicolò Crescini
 
 import os
 import numpy as np
@@ -13,7 +12,7 @@ class OHUtils():
 
     # useful variables
     def __init__(self):
-        self.test = 1
+        self.variable = 0
 
     def dB(x):
         return 10 * np.log10(x)
@@ -23,6 +22,7 @@ class OHUtils():
         f = m * c.e / c.hbar  / (2 * c.pi)
         return f
 
+    # helper functions
     def load_experiment_json(haloscope_name):
         dirname = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -33,7 +33,6 @@ class OHUtils():
         haloscope_json = os.path.join(dirname, data_folder, experiments_folder, haloscope_name)
 
         return haloscope_json
-
 
     def get_runs_folder():
         dirname = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

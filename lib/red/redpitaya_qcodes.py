@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # This is a Qcodes driver for Redpitaya board written for the Alca Haloscope project.
-# Written by Nicolò Crescini taking inspiration from a version by Arpit Ranadive and Martina Esposito.
+# Written by Nicolò Crescini with inspiration from a version by Arpit Ranadive and Martina Esposito.
 
 import time
 import binascii
@@ -842,7 +842,8 @@ class Redpitaya(VisaInstrument):
         
         self.add_parameter( name='ADC_buffer_size',
                             label='Returns the buffer size',
-                            get_cmd='ACQ:BUF:SIZE?'
+                            get_cmd='ACQ:BUF:SIZE?',
+                            get_parser=int
                             )
         
         inputs = ['1', '2']

@@ -7,16 +7,21 @@
 # one experiment, or haloscope, then it is better to keep it within the corresponding experiment class. For example
 # the function to analyse a run, being a specific process which depends on the haloscope, is only a function of a 
 # specific experiment class,  like FermionicHaloscope().
-#
-# Written by Nicolò Crescini
+
 
 import os
 import json
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.signal import butter, sosfilt
-from scipy import constants as c
 from datetime import datetime
+
+import numpy as np
+from scipy.signal import butter, sosfilt
+from scipy.optimize import curve_fit
+from scipy import constants as c
+
+import matplotlib.pyplot as plt
+# plot options
+plt.rc('text', usetex = True)
+plt.rc('font', family = 'serif', size=14)
 
 # open haloscope functions
 from .utils import OHUtils
@@ -100,6 +105,10 @@ class FermionicHaloscope(Experiment):
         self.haloscope_name = self.experiment_parameters['haloscope_name']
         self.sensitivity_parameters = {"f0": self.experiment_parameters['f0'],       # frequency of the resonance 
                                        "Q": self.experiment_parameters['Q'],         # quality factor of the resonance
+                                       "f1": self.experiment_parameters['f2'],       # freuquency of resonance 1
+                                       "k1": self.experiment_parameters['k1'],       # linewidth of resonance 1
+                                       "f2": self.experiment_parameters['f2'],       # frequency of resonance 2
+                                       "k2": self.experiment_parameters['k2'],       # linewidth of resonance 2
                                        "An": self.experiment_parameters['An'],       # amplitude/rt(Hz) of the noise
                                        "Ap": self.experiment_parameters['Ap'],       # amplitude of the pump
                                        "beta1": self.experiment_parameters['beta1'], # coupling of antenna 1
@@ -144,9 +153,9 @@ class FermionicHaloscope(Experiment):
         red.ADC_trigger_level(trigger)
         print(' inputs configured, trigger level =', str(trigger), 'V, decimation =', str(decimation))
         self.sampling_frequency = red.FS / red.ADC_decimation()
-        self.buffer_length = red.buffer_length
+        self.buffer_length = red.ADC_buffer_size()
         print(' resulting sampling frequency =', str(self.sampling_frequency / 1e6), 'MHz')
-        print(' buffer length =', str(self.buffer_length))
+        print(' buffer length =', str(self.buffer_length),'samples, i.e.', str(self.buffer_length/self.sampling_frequency),'s')
 
         # outputs
         red.align_channels_phase()
@@ -179,9 +188,9 @@ class FermionicHaloscope(Experiment):
 
         print('\nHaloscope initialised. Good luck, dark matter hunter.')
 
-    def characterise(self, db_name = 'experiment_characterisation.db', monitoring_time = 30, time_points = 61, start_frequency=2e6, stop_frequency=10e6, frequency_points=101, rbw=10e3, probe_power=0.001, averages=2):
+    def characterise(self, db_name = 'experiment_characterisation.db', monitoring_time = 30, time_points = 61, start_frequency=2e6, stop_frequency=10e6, frequency_points=101, rbw=10e3, probe_power=0.001, averages=2, plot = False):
         # launch a characterisation measurement of the haloscope, which consists in a transmission measurement
-        # of its two channels, and some time to monitor its sensors.
+        # of its two channels, and some time to monitor its sensors. The default sampling time for the sensors is 1/s.
 
         print('Characterisation data')
 
@@ -194,7 +203,7 @@ class FermionicHaloscope(Experiment):
 
         # measure s21 of both channels 
         print('\nInitiating spectroscopy in the span', str(start_frequency/1e6), 'to', str(stop_frequency/1e6), 'MHz.')
-        meas = Measurement(exp=exp, station=self.station, name='spectroscopy')
+        meas = Measurement(exp=exp, station=self.station)
 
         self.station.redpitaya.vna_start(start_frequency)
         self.station.redpitaya.vna_stop(stop_frequency)
@@ -205,27 +214,96 @@ class FermionicHaloscope(Experiment):
         self.station.redpitaya.vna_averages(averages)
 
         print(' channel 1')
-        do0d(self.station.redpitaya.TX1);
+        dataset_tx1 = do0d(self.station.redpitaya.TX1, measurement_name='spectroscopy ch1');
         print(' channel 2')
-        do0d(self.station.redpitaya.TX2);
+        dataset_tx2 = do0d(self.station.redpitaya.TX2, measurement_name='spectroscopy ch2');
 
         # check sensors stability
         print('\nInitiating sensors stability check for', str(monitoring_time), 's')
-        meas = Measurement(exp=exp, station=self.station, name='sensors')
 
         print(' temperature')
-        do1d(chrono.t0, 0, monitoring_time, time_points, monitoring_time/time_points, self.station.redpitaya.temperature);
+        t_wait = 0.9 # 1 sample per second minus 0.1 seconds of delay set by the arduino
+        dataset_t = do1d(chrono.t0, 0, 100, monitoring_time // 1, t_wait, self.station.redpitaya.temperature, measurement_name='sensors - t');
         print(' pressure')
-        do1d(chrono.t0, 0, monitoring_time, time_points, monitoring_time/time_points, self.station.redpitaya.pressure);
+        dataset_p = do1d(chrono.t0, 0, 100, monitoring_time // 1, t_wait, self.station.redpitaya.pressure, measurement_name='sensors - p');
         print(' magnetic_field')
-        do1d(chrono.t0, 0, monitoring_time, time_points, monitoring_time/time_points, self.station.redpitaya.magnetic_field);
+        dataset_b = do1d(chrono.t0, 0, 100, monitoring_time // 1, t_wait, self.station.redpitaya.magnetic_field, measurement_name='sensors - B');
         print(' photoresistance')
-        do1d(chrono.t0, 0, monitoring_time, time_points, monitoring_time/time_points, self.station.redpitaya.photoresistance);
+        dataset_l = do1d(chrono.t0, 0, 100, monitoring_time // 1, t_wait, self.station.redpitaya.photoresistance, measurement_name='sensors - light');
         #print(' acceleration')
-        #do1d(chrono.t0, 0, monitoring_time, time_points, monitoring_time/time_points, self.station.redpitaya.acceleration)
+        #dataset_t = do1d(chrono.t0, 0, 100, monitoring_time // 1, t_wait, self.station.redpitaya.acceleration)
+
+        # getting the data
+        f1 = dataset_tx1[0].get_parameter_data()['redpitaya_TX1']['redpitaya_frequency_axis']
+        tx1 = dataset_tx1[0].get_parameter_data()['redpitaya_TX1']['redpitaya_TX1']
+
+        f2 = dataset_tx2[0].get_parameter_data()['redpitaya_TX2']['redpitaya_frequency_axis']
+        tx2 = dataset_tx2[0].get_parameter_data()['redpitaya_TX2']['redpitaya_TX2']
+
+        time = np.linspace(0, monitoring_time, monitoring_time // 1)
+        t = dataset_t[0].get_parameter_data()['redpitaya_temperature']['redpitaya_temperature']
+        p = dataset_p[0].get_parameter_data()['redpitaya_pressure']['redpitaya_pressure']
+        b = dataset_b[0].get_parameter_data()['redpitaya_magnetic_field']['redpitaya_magnetic_field']
+        l = dataset_l[0].get_parameter_data()['redpitaya_photoresistance']['redpitaya_photoresistance']
+
+        # fitting the resonances
+        # resonance 1
+        x0 = np.argmax(tx1)
+        start = x0 - frequency_points//10
+        stop = x0 + frequency_points//10
+
+        popt1, _ = curve_fit(self.lorentzian, f1[start:stop], tx1[start:stop]**2 / np.max(tx1**2), p0=[f1[x0], 1, f1[x0]/100])
+        self.experiment_parameters['f1'] = popt1[0]
+        self.experiment_parameters['k1'] = popt1[2]
+
+        # resonance 2
+        x0 = np.argmax(tx2)
+        start = x0 - frequency_points//10
+        stop = x0 + frequency_points//10
+
+        popt2, _ = curve_fit(self.lorentzian, f2[start:stop], tx2[start:stop]**2 / np.max(tx2**2), p0=[f2[x0], 1, f2[x0]/100])
+        self.experiment_parameters['f2'] = popt2[0]
+        self.experiment_parameters['k2'] = popt2[2]
+
+        # optional plotting
+        if plot == True:
+            plt.figure(figsize=(12, 6))
+            ax0 = plt.subplot(2,1,1)  
+            ax1 = plt.subplot(2,4,5)    
+            ax2 = plt.subplot(2,4,6)
+            ax3 = plt.subplot(2,4,7)
+            ax4 = plt.subplot(2,4,8)
+
+            # transmissions
+            f_plot = np.linspace(start_frequency, stop_frequency, 100001)
+            ax0.set_xlabel('Frequency (MHz)')
+            ax0.set_ylabel('Transmission (a.u.)')
+            ax0.semilogy(f1/1e6, tx1 / np.max(tx1))
+            ax0.semilogy(f_plot/1e6, np.sqrt(self.lorentzian(f_plot, *popt1)), alpha=0.5)
+            ax0.semilogy(f2/1e6, tx2 / np.max(tx2))
+            ax0.semilogy(f_plot/1e6, np.sqrt(self.lorentzian(f_plot, *popt2)), alpha=0.5)
+
+            # sensors
+            ax1.set_xlabel('Time (s)')
+            ax1.set_ylabel('Temperature (K)')
+            ax1.plot(time, t, 'o')
+
+            ax2.set_xlabel('Time (s)')
+            ax2.set_ylabel('Pressure (bar)')
+            ax2.plot(time, p, 'o')
+
+            ax3.set_xlabel('Time (s)')
+            ax3.set_ylabel('B-field (V)')
+            ax3.plot(time, b, 'o')
+
+            ax4.set_xlabel('Time (s)')
+            ax4.set_ylabel('Photoresistance (V)')
+            ax4.plot(time, l, 'o')
+
+            plt.tight_layout()
+
 
         print('\nHaloscope parameters acquired.')
-
 
     def prepare_for_operation(self):
 
@@ -279,8 +357,6 @@ class FermionicHaloscope(Experiment):
     def analyse_run(self, data1, data2):
         # Simple analysis routine to extract the limit on the effective magnetic field starting from the run data
         # of the fermionic interferometer.
-
-
 
         return 0
 

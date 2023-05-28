@@ -3,8 +3,7 @@
 # This is the place to add all the properties of particles which can be searched with the haloscope.
 # The properties can be used to estimate the sensitivity, extract upper limits, get experimentally 
 # relevant numbers and so on.
-#
-# Written by Nicolò Crescini
+
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -86,6 +85,17 @@ class DarkPhoton(Particle):
         super().__init__(self)
         self.mass = 0.0                 # eV
         self.interaction_constant = 0.0 # eV
+
+
+class GravitationalWave(Particle):
+    def __init__(self, *args, **kwargs):
+        super().__init__(self)
+        self.mass = 0.0                 # eV
+        self.interaction_constant = 0.0 # eV
+
+
+
+
 
 
 
