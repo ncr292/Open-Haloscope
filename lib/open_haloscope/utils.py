@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Main file with the varius tools used in the Open Haloscope project
 
-import os
+import sys, os
 import numpy as np
 from scipy import constants as c
 
@@ -43,9 +43,13 @@ class OHUtils():
 
         return data_path
 
+    def get_logs_folder():
+        dirname = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+        data_folder = 'data'
+        logs_folder = 'logs'
+        logs_path = os.path.join(dirname, data_folder, logs_folder)
 
-        
-
+        return logs_path
 
 

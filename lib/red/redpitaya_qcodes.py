@@ -44,13 +44,13 @@ class IN1_data(ParameterWithSetpoints):
         super().__init__(*args, **kwargs)
 
     def get_raw(self):
-        duration = self._instrument.acquisition_length()
+        waveforms_number = self._instrument.number_of_waveforms()
         sampling_frequency = self._instrument.sampling_frequency()
         decimation = self._instrument.ADC_decimation()
         points = self._instrument.waveform_points()
 
         # acquire data from channel 1
-        raw_data = self._instrument.get_data(1, duration, data_type='BIN')
+        raw_data = self._instrument.get_data(1, waveforms_number, data_type='BIN')
 
         try:
             data = np.reshape(raw_data, (self._instrument.number_of_waveforms(), 
@@ -68,13 +68,13 @@ class IN2_data(ParameterWithSetpoints):
         super().__init__(*args, **kwargs)
 
     def get_raw(self):
-        duration = self._instrument.acquisition_length()
+        waveforms_number = self._instrument.number_of_waveforms()
         sampling_frequency = self._instrument.sampling_frequency()
         decimation = self._instrument.ADC_decimation()
         points = self._instrument.waveform_points()
 
         # acquire data from channel 2
-        raw_data = self._instrument.get_data(2, duration, data_type='BIN')
+        raw_data = self._instrument.get_data(2, waveforms_number, data_type='BIN')
 
         try:
             data = np.reshape(raw_data, (self._instrument.number_of_waveforms(), 
@@ -884,6 +884,16 @@ class Redpitaya(VisaInstrument):
                             get_cmd=None
                             )
 
+        # starting waveform (useless, but qcodes wants it)
+        self.add_parameter( 'waveform_start',
+                            unit='',
+                            initial_value=0,
+                            vals=vals.Numbers(0, np.inf),
+                            get_cmd=None,
+                            set_cmd=None,
+                            get_parser=int
+                            )
+
         # number of points in a single waveform
         self.add_parameter( 'waveform_points',
                             unit='',
@@ -907,7 +917,7 @@ class Redpitaya(VisaInstrument):
         # number of waveforms in the run
         self.add_parameter( 'number_of_waveforms',
                             unit='',
-                            initial_value=0,
+                            initial_value=1,
                             vals=vals.Numbers(0, np.inf),
                             get_cmd=None,
                             set_cmd=None,
@@ -915,11 +925,20 @@ class Redpitaya(VisaInstrument):
                             )
 
         ## time axis
+        self.add_parameter( 'time_start',
+                            unit='',
+                            initial_value=0.0,
+                            vals=vals.Numbers(0.0, np.inf),
+                            get_cmd=None,
+                            set_cmd=None,
+                            get_parser=int
+                            )
+
         self.add_parameter( 'time_axis',
                             unit='s',
                             label='Time axis',
                             parameter_class=GeneratedSetPoints,
-                            start_param = 0,
+                            start_param = self.time_start,
                             stop_param=self.waveform_length,
                             num_points_param=self.waveform_points,
                             snapshot_value=False,
@@ -931,7 +950,7 @@ class Redpitaya(VisaInstrument):
                             unit='',
                             label='Waveform number',
                             parameter_class=GeneratedSetPoints,
-                            start_param = 0,
+                            start_param = self.waveform_start,
                             stop_param=self.number_of_waveforms,
                             num_points_param=self.number_of_waveforms,
                             snapshot_value=False,
@@ -939,16 +958,16 @@ class Redpitaya(VisaInstrument):
                             )
 
         self.add_parameter( 'duty_cycle',
-                            initial_value=self.estimated_duty_cycle(),
+                            initial_value=0.0046, # this value is obtained with a decimation of 4
                             set_cmd=None,
-                            get_cmd=self.estimated_duty_cycle
+                            get_cmd=None
                             )
 
 
         ## measured waveform 1
         self.add_parameter( 'IN1',
                             unit='V',
-                            setpoints=(self.waveform_axis,self.time_axis),
+                            setpoints=(self.waveform_axis, self.time_axis,),
                             label='Input 1',
                             parameter_class=IN1_data,
                             vals=vals.Arrays(shape=(self.number_of_waveforms.get_latest,self.waveform_points.get_latest,))
@@ -957,7 +976,7 @@ class Redpitaya(VisaInstrument):
         ## measured waveform 2
         self.add_parameter( 'IN2',
                             unit='V',
-                            setpoints=(self.waveform_axis,self.time_axis),
+                            setpoints=(self.waveform_axis,self.time_axis,),
                             label='Input 2',
                             parameter_class=IN2_data,
                             vals=vals.Arrays(shape=(self.number_of_waveforms.get_latest,self.waveform_points.get_latest,))
@@ -1251,7 +1270,7 @@ class Redpitaya(VisaInstrument):
 
 
     # composite acquisition functions
-    def get_data(self, channel, duration, data_type='ASCII'):
+    def get_data(self, channel, waveforms_number, data_type='ASCII', disable_pbar=True):
     # This is the core part of the measurement, with a defined measurement length it
     # keeps reading and emptying the Redpitaya buffer, concatenating the waveforms.
 
@@ -1261,6 +1280,7 @@ class Redpitaya(VisaInstrument):
 
         t = 0.0
         index = 0
+        duration = self.estimate_acquisition_length()
 
         """
         Ci sono ancora diversi problemi.
@@ -1275,9 +1295,9 @@ class Redpitaya(VisaInstrument):
 
             t0 = time.time()
             self.ADC_write_pointer(0)
-            pbar = tqdm(total=100)
+            pbar = tqdm(total=waveforms_number, disable=disable_pbar)
 
-            while t < duration:
+            while index < waveforms_number:
                 index += 1
 
                 # trigger the ADC and refill the buffer
@@ -1291,20 +1311,23 @@ class Redpitaya(VisaInstrument):
                         break
 
                 # this reduced the maximum duty cycle to 75%            
-                time.sleep(1.5 * BLOCK / self.FS)
+                #time.sleep(1.0 * BLOCK / self.FS)
+
                 data += self.ADC_read_N_after_trigger(channel, BLOCK)[1:-1] + ','
 
                 # increment the waveform number
-                self.number_of_waveforms(index)
+                #self.number_of_waveforms(index)
                 trash = self.get_output()
 
-                # update the time which passed from the beginning of the run
-                t = time.time() - t0
-                pbar.update(int(100 * t / duration - pbar.n))
+                pbar.update(1)
                 self.ADC_stop()
 
             pbar.close()
             time.sleep(0.2)
+
+            # update the time which passed from the beginning of the run and the wavefor index
+            t = time.time() - t0
+            self.acquisition_length(t)
 
             data_string = np.array( data[1:-1].split(',') )
             data_line = data_string.astype(float)
@@ -1320,9 +1343,9 @@ class Redpitaya(VisaInstrument):
 
             t0 = time.time()
             #self.ADC_write_pointer(0)
-            pbar = tqdm(total=100)
+            pbar = tqdm(total=waveforms_number, disable=disable_pbar)
 
-            while t < duration:
+            while index < waveforms_number:
                 index += 1
 
                 # trigger the ADC and refill the buffer
@@ -1335,23 +1358,25 @@ class Redpitaya(VisaInstrument):
                     if self.ADC_trigger() == 'TD':
                         break
 
-                # this reduced the maximum duty cycle to 75%
-                time.sleep(1.0 * BLOCK / self.FS)
+                # this reduced the maximum duty cycle to 50%
+                #time.sleep(1.0 * BLOCK / self.FS)
 
                 new_waveform = self.ADC_read_N_after_trigger_bin(channel, BLOCK)
                 data = np.append(data, new_waveform)
                 #print(data)
 
-                # update the time which passed from the beginning of the run and the wavefor index
-                t = time.time() - t0
-                self.number_of_waveforms(index)
+                #self.number_of_waveforms(index)
                 trash = self.get_output()
 
-                pbar.update(int(100 * t / duration - pbar.n))
+                pbar.update(1)
                 self.ADC_stop()
 
             pbar.close()
             time.sleep(0.2)
+
+            # update the time which passed from the beginning of the run and the wavefor index
+            t = time.time() - t0
+            self.acquisition_length(t)
 
             # go back to ascii at the end
             self.ADC_data_format('ASCII')
@@ -1575,10 +1600,36 @@ class Redpitaya(VisaInstrument):
         
         return status_out
 
-    def estimated_duty_cycle(self):
-        # calculated instrument duty cycle (based on the previous run)
+    def estimate_waveform_number(self, duration=None):
+        # estimate the number of waveforms in a run (needed to intialise the axis of Qcodes)
+        if (duration == None):
+            n = self.acquisition_length()*self.duty_cycle() / self.waveform_length() / self.ADC_decimation()
+        else:
+            n = duration*self.duty_cycle() / self.waveform_length() / self.ADC_decimation()
+
+        #self.number_of_waveforms(int(n))
+        return int(n)
+
+    def estimate_acquisition_length(self):
+        # estimate the number of waveforms in a run (needed to intialise the axis of Qcodes)
+        t = self.number_of_waveforms() / self.duty_cycle() * self.waveform_length() * self.ADC_decimation()
+
+        self.acquisition_length(t)
+        return t
+
+    def estimate_duty_cycle(self, waveforms_sample=30):
+        # calculated instrument duty cycle
+        self.number_of_waveforms(waveforms_sample)
+
+        self.OUT1_status('ON')
+        sample_data = self.IN1()
+        self.OUT1_status('OFF')
+
         acquired_points = self.number_of_waveforms() * self.BUFFER_SIZE
         estimated_points = self.acquisition_length() * self.FS / self.ADC_decimation()
 
-        return acquired_points / estimated_points
+        duty_cycle = acquired_points / estimated_points
+
+        self.duty_cycle(duty_cycle)
+        return duty_cycle
 

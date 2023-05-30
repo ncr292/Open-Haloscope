@@ -11,7 +11,10 @@
 
 import os
 import json
+import time
+import contextlib
 from datetime import datetime
+from tqdm import tqdm
 
 import numpy as np
 from scipy.signal import butter, sosfilt
@@ -34,8 +37,7 @@ from qcodes.dataset import (do0d,
                             experiments,
                             initialise_or_create_database_at,
                             load_or_create_experiment,
-                            load_by_run_spec,
-                            plot_dataset
+                            load_by_run_spec
                             )
 
 # qcodes dummy instrument for time
@@ -58,6 +60,19 @@ class Experiment():
 
         with open(experiment_json) as json_file:
             self.experiment_parameters = json.load(json_file)
+
+    def update_json_file(self, path_json, update_dict):
+        json_file = open(path_json, "r") # Open the JSON file for reading
+        data = json.load(json_file) # Read the JSON into the buffer
+        json_file.close() # Close the JSON file
+
+        ## Working with buffered content
+        update_data = data | update_dict
+
+        ## Save our changes to JSON file
+        json_file = open(path_json, "w+")
+        json_file.write(json.dumps(update_data, indent=2))
+        json_file.close()
 
     def mixer(self, signal_a, signal_b):
         # mixing an input signal with a local oscillator
@@ -100,6 +115,7 @@ class FermionicHaloscope(Experiment):
 
         self.instruments = []
         self.data_path = ''
+        self.logs_path = ''
         self._initialiseExperiment(experiment_json)
         
         self.haloscope_name = self.experiment_parameters['haloscope_name']
@@ -147,11 +163,15 @@ class FermionicHaloscope(Experiment):
         print('\nSetup the radiofrequency lines')
 
         # input
+        red.IN1_gain('LV')
+        red.IN2_gain('LV')
+        print(' input gain set to', red.IN1_gain())
+
         red.ADC_averaging('OFF')
         red.ADC_decimation(decimation)
 
         red.ADC_trigger_level(trigger)
-        print(' inputs configured, trigger level =', str(trigger), 'V, decimation =', str(decimation))
+        print(' trigger level =', str(trigger), 'V, decimation =', str(decimation))
         self.sampling_frequency = red.FS / red.ADC_decimation()
         self.buffer_length = red.ADC_buffer_size()
         print(' resulting sampling frequency =', str(self.sampling_frequency / 1e6), 'MHz')
@@ -173,18 +193,23 @@ class FermionicHaloscope(Experiment):
         print(' photoresistance =', str(red.photoresistance()), 'V')
         print(' acceleration =', str(red.acceleration()), 'm/s^2')
 
-        print('\nConfiguring data storage.')
+        print('\nConfiguring data storage')
         self.data_path += os.path.join(OHUtils.get_runs_folder(), datetime.today().strftime('%Y-%m-%d')) 
         if not os.path.exists(self.data_path):
             os.makedirs(self.data_path)
         print(' data are stored in', self.data_path)
+
+        self.logs_path += os.path.join(OHUtils.get_logs_folder(), datetime.today().strftime('%Y-%m-%d')) 
+        if not os.path.exists(self.logs_path):
+            os.makedirs(self.logs_path)
+        print(' logs are stored in', self.logs_path)
 
         # QCodes configuration
         self.station = qc.Station()
         for instrument in instruments_list:
                     self.station.add_component(instrument)  
         self.station.add_component(chrono)
-        print(' QCodes station and database configured')
+        print(' QCodes station, QCodes database and logfiles configured')
 
         print('\nHaloscope initialised. Good luck, dark matter hunter.')
 
@@ -193,6 +218,9 @@ class FermionicHaloscope(Experiment):
         # of its two channels, and some time to monitor its sensors. The default sampling time for the sensors is 1/s.
 
         print('Characterisation data')
+
+        if self.station.redpitaya.IN1_gain() != 'LV':
+            print('Warning: the input gain is', IN1_gain(), '. For characterisation purposes, the gain should be LV.')
 
         # create a database which contains the characterisation measurements
         db_path = os.path.join(self.data_path, db_name)
@@ -223,13 +251,13 @@ class FermionicHaloscope(Experiment):
 
         print(' temperature')
         t_wait = 0.9 # 1 sample per second minus 0.1 seconds of delay set by the arduino
-        dataset_t = do1d(chrono.t0, 0, 100, monitoring_time // 1, t_wait, self.station.redpitaya.temperature, measurement_name='sensors - t');
+        dataset_t = do1d(chrono.t0, 0, 100, monitoring_time // 1, t_wait, self.station.redpitaya.temperature, measurement_name='sensors - t', show_progress=False);
         print(' pressure')
-        dataset_p = do1d(chrono.t0, 0, 100, monitoring_time // 1, t_wait, self.station.redpitaya.pressure, measurement_name='sensors - p');
+        dataset_p = do1d(chrono.t0, 0, 100, monitoring_time // 1, t_wait, self.station.redpitaya.pressure, measurement_name='sensors - p', show_progress=False);
         print(' magnetic_field')
-        dataset_b = do1d(chrono.t0, 0, 100, monitoring_time // 1, t_wait, self.station.redpitaya.magnetic_field, measurement_name='sensors - B');
+        dataset_b = do1d(chrono.t0, 0, 100, monitoring_time // 1, t_wait, self.station.redpitaya.magnetic_field, measurement_name='sensors - B', show_progress=False);
         print(' photoresistance')
-        dataset_l = do1d(chrono.t0, 0, 100, monitoring_time // 1, t_wait, self.station.redpitaya.photoresistance, measurement_name='sensors - light');
+        dataset_l = do1d(chrono.t0, 0, 100, monitoring_time // 1, t_wait, self.station.redpitaya.photoresistance, measurement_name='sensors - light', show_progress=False);
         #print(' acceleration')
         #dataset_t = do1d(chrono.t0, 0, 100, monitoring_time // 1, t_wait, self.station.redpitaya.acceleration)
 
@@ -305,15 +333,150 @@ class FermionicHaloscope(Experiment):
 
         print('\nHaloscope parameters acquired.')
 
-    def prepare_for_operation(self):
+    def prepare_for_operation(self, a1=1, a2=1):
+        # Function which sets all the haloscope parameters preparing it for a run.
+        
+        f1 = self.experiment_parameters['f1']
+        f2 = self.experiment_parameters['f2']
+
+        print('Preparing generators')
+        self.station.redpitaya.OUT1_frequency(f1)
+        self.station.redpitaya.OUT1_amplitude(a1)
+        print(' frequency of output 1 set to', str(f1/1e6), 'MHz')
+        print(' amplitude of output 1 set to', str(a1), 'V')
+
+        self.station.redpitaya.OUT2_frequency(f2)
+        self.station.redpitaya.OUT2_amplitude(a2)
+        print(' frequency of output 2 set to', str(f2/1e6), 'MHz')
+        print(' amplitude of output 2 set to', str(a2), 'V\n')
+
+        print(' generators setup for operation and turned off.')
+        self.station.redpitaya.OUT1_status('OFF')
+        self.station.redpitaya.OUT2_status('OFF')
+
+        print('\nPreparing acquisition')
+        self.station.redpitaya.IN1_gain('HV')
+        self.station.redpitaya.IN2_gain('HV')
+        print(' input 1 gain set to', self.station.redpitaya.IN1_gain())
+        print(' input 2 gain set to', self.station.redpitaya.IN2_gain())
+        print(' the sampling frequency is', str(self.sampling_frequency/1e6), 'MHz\n')
+
+        print(' calibrating the duty cycle')
+        self.station.redpitaya.estimate_duty_cycle()
+        print(' the resulting duty cycle is', str(self.station.redpitaya.duty_cycle()))
+
+        print(' input channels configured')
 
         print('\nHaloscope ready for research.')
-        return 0
 
-    def run(self):
+    def run(self, run_time, data_saver_periodicity=10, db_name = 'experiment_data.db'):
+        # Data acquisition function to acquire the data of a scientific run.
+        # This function will save the data in a database, separate from the characterisation one,
+        # in blocks of data_saver_periodicity duration. Upon saving a data block, all the sensors
+        # reads are saved in a log file.
 
+        t0 = time.time()
+
+        # load the log file of the runs
+        logfile_run = os.path.join(os.path.dirname(self.logs_path), 'runs.txt')
+
+        with open(logfile_run, "r") as rlog:
+            last_line = rlog.readlines()[-1]
+            run_number = int(last_line.split('\t')[0]) + 1
+        run_number = str(run_number)
+
+        # generate new run name
+        run_name = 'RUN_' + run_number
+        print('Starting ' + run_name)
+
+        # record starting date on the runs.txt logfile
+        now = datetime.now()
+        with open(logfile_run, "a") as rlog:
+            rlog.write('\n')
+            rlog.write(run_number + '\t' + now.strftime("%d/%m/%Y %H:%M:%S"))
+
+        # create a database which contains the characterisation measurements
+        db_path = os.path.join(self.data_path, db_name)
+        initialise_or_create_database_at(db_path)
+        print(' run database created in', self.data_path)
+
+        # create a sensor logfile for the run
+        log_name = run_name + '_log.txt'
+        with open(os.path.join(self.logs_path, log_name), 'w') as sensor_log:
+            sensor_log.write('# temperature (K)\tpressure (bar)\tmagnetic field (V)\tphotoresistance (V)\tacceleration (m/s^2)\n')
+            sensor_log.write(str(self.station.redpitaya.temperature()) + '\t')
+            sensor_log.write(str(self.station.redpitaya.pressure()) + '\t')
+            sensor_log.write(str(self.station.redpitaya.magnetic_field()) + '\t')
+            sensor_log.write(str(self.station.redpitaya.photoresistance()) + '\t')
+            sensor_log.write(str(self.station.redpitaya.acceleration()) + '\n')
+
+        # create experiment for the run
+        exp = load_or_create_experiment(experiment_name=self.haloscope_name, sample_name=run_name)
+
+        # measure
+        print('\nInitiating data acquisition')
+        meas = Measurement(exp=exp, station=self.station)
+
+        print(' f1 =', self.station.redpitaya.OUT1_frequency(), 'MHz \tf2 =', self.station.redpitaya.OUT2_frequency(), 'MHz')
+        print(' a1 =', self.station.redpitaya.OUT1_amplitude(), 'V \t\ta2 =', self.station.redpitaya.OUT2_amplitude(), 'V')
+
+        # turn on the generators
+        self.station.redpitaya.OUT1_status('ON')
+        self.station.redpitaya.OUT2_status('ON')
+        print('\n outputs on\n')
+
+        # initiate the real acquisition
+        waveforms_number = self.station.redpitaya.estimate_waveform_number(duration=data_saver_periodicity/2)
+        self.station.redpitaya.number_of_waveforms(waveforms_number)
+
+        data_blocks_number = run_time // data_saver_periodicity
+
+        print(' estimated number of waveforms per data block:', str(waveforms_number))
+        print(' estimated number of data blocks:', str(data_blocks_number))
+
+        index = 0
+        pbar = tqdm(total=data_blocks_number)
+
+        while data_blocks_number > index:
+            index += 1
+
+            # suppress annoying output
+            with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):
+                # channel 1
+                do0d(self.station.redpitaya.IN1, measurement_name='data ch1', log_info='Channel 1');
+                # channel 2
+                do0d(self.station.redpitaya.IN2, measurement_name='data ch2', log_info='Channel 2');
+
+            #time.sleep(data_saver_periodicity)
+            # add sensor data to the logs
+            with open(os.path.join(self.logs_path, log_name), 'a') as sensor_log:
+                sensor_log.write(str(self.station.redpitaya.temperature()) + '\t')
+                sensor_log.write(str(self.station.redpitaya.pressure()) + '\t')
+                sensor_log.write(str(self.station.redpitaya.magnetic_field()) + '\t')
+                sensor_log.write(str(self.station.redpitaya.photoresistance()) + '\t')
+                sensor_log.write(str(self.station.redpitaya.acceleration()) + '\n')
+
+            pbar.update(1)
+
+        pbar.close()
+
+        # turn off the generators
+        self.station.redpitaya.OUT1_status('OFF')
+        self.station.redpitaya.OUT2_status('OFF')
+        print('\n outputs off\n')
+
+        # calculate the run's duration
+        now = datetime.now()
+        with open(logfile_run, "a") as rlog:
+            rlog.write('\t' + now.strftime("%d/%m/%Y %H:%M:%S"))
+
+        run_duration = time.time() - t0
+        print(' total number of acquired waveforms=', str(data_blocks_number*waveforms_number))
+        print(' actual duration of the run=', str(run_duration),'s')
+
+        time.sleep(1)
         print('\nRun completed.')
-        return 0
+
 
     def generate_simulated_run_data(self, f1=5e6, a1=1, f2=6e6, a2=1, phase_noise=1e-8, amplitude_noise=1e-5, number_of_traces=1000, axion_signal=True, aa=1e-8, fa=2e3, common_noise_frequency = 1e3, common_noise_amplitude = 1e-5):
         # This function generates fake data which look like the ones of a real experimental run, it can be 

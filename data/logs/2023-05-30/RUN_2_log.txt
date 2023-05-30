@@ -1,0 +1,1 @@
+# temperature (K)	pressure (bar)	magnetic field (V)	photoresistance (V)	acceleration (m/s^2)
