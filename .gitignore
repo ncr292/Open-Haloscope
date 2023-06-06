@@ -6,3 +6,6 @@
 .ipynb_checkpoints
 .gitattributes
 .DS_store
+RUN_*
+lib/red/red_pitaya_streaming_client_python-master
+lib/red/streaming_client

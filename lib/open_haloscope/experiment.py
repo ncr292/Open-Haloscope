@@ -17,7 +17,7 @@ from datetime import datetime
 from tqdm import tqdm
 
 import numpy as np
-from scipy.signal import butter, sosfilt
+from scipy.signal import butter, sosfilt, periodogram
 from scipy.optimize import curve_fit
 from scipy import constants as c
 
@@ -108,8 +108,21 @@ class Experiment():
     def lorentzian(self, x, x0, a, gamma):
         return a * gamma**2 / ( gamma**2 + ( x - x0 )**2)
 
+    def background(self, frequency, ap, kp, ar, kr, c):
+        # function which models the background of a fermionic haloscope
+
+        pump = self.lorentzian(frequency, 0, ap, kp)
+        res = self.lorentzian(frequency, 0, ar, kr)
+        cst = c * np.ones(len(frequency))
+
+        return (pump + cst) / res
+
 
 class FermionicHaloscope(Experiment):
+    """
+    Main class of open-haloscope, which contains all the function to characterise and operate the haloscope,
+    as well as the analysis functions.
+    """
     def __init__(self, experiment_json):
         super().__init__(experiment_json)
 
@@ -119,19 +132,13 @@ class FermionicHaloscope(Experiment):
         self._initialiseExperiment(experiment_json)
         
         self.haloscope_name = self.experiment_parameters['haloscope_name']
-        self.sensitivity_parameters = {"f0": self.experiment_parameters['f0'],       # frequency of the resonance 
+        self.sensitivity_parameters = {"f": self.experiment_parameters['f'],         # frequency of the resonance 
                                        "Q": self.experiment_parameters['Q'],         # quality factor of the resonance
-                                       "f1": self.experiment_parameters['f2'],       # freuquency of resonance 1
-                                       "k1": self.experiment_parameters['k1'],       # linewidth of resonance 1
-                                       "f2": self.experiment_parameters['f2'],       # frequency of resonance 2
-                                       "k2": self.experiment_parameters['k2'],       # linewidth of resonance 2
-                                       "An": self.experiment_parameters['An'],       # amplitude/rt(Hz) of the noise
+                                       "An": self.experiment_parameters['An'],       # amplitude of the noise
                                        "Ap": self.experiment_parameters['Ap'],       # amplitude of the pump
-                                       "beta1": self.experiment_parameters['beta1'], # coupling of antenna 1
-                                       "beta2": self.experiment_parameters['beta2']  # coupling of antenna 2
                                        }
 
-    def get_sensitivity(self, f0, Q, An, Ap, beta1, beta2):
+    def get_b_sensitivity(self, f, Q, An, Ap, beta1=1, beta2=1):
         """
         This function return the sensitivity of the haloscope given some specified quantities.
         Supposedly, the expected (or already measured) parameters are in the experiment .json file,
@@ -140,7 +147,7 @@ class FermionicHaloscope(Experiment):
 
         # electron gyromagnetic ration in MHz/T
         gamma = c.physical_constants['electron gyromag. ratio in MHz/T'][0] * 1e6
-        B0 = f0 / gamma
+        B0 = f / gamma
         eta = (1 + beta2) / 2 * np.sqrt((1 + beta1) / (beta1 * beta2))
 
         b = 2 * eta * B0 / (np.pi * Q) * (An / Ap)
@@ -369,7 +376,7 @@ class FermionicHaloscope(Experiment):
 
         print('\nHaloscope ready for research.')
 
-    def run(self, run_time, data_saver_periodicity=10, db_name = 'experiment_data.db'):
+    def run(self, run_time, data_saver_periodicity=10):
         # Data acquisition function to acquire the data of a scientific run.
         # This function will save the data in a database, separate from the characterisation one,
         # in blocks of data_saver_periodicity duration. Upon saving a data block, all the sensors
@@ -396,6 +403,7 @@ class FermionicHaloscope(Experiment):
             rlog.write(run_number + '\t' + now.strftime("%d/%m/%Y %H:%M:%S"))
 
         # create a database which contains the characterisation measurements
+        db_name = run_name + '_experiment_data.db'
         db_path = os.path.join(self.data_path, db_name)
         initialise_or_create_database_at(db_path)
         print(' run database created in', self.data_path)
@@ -421,9 +429,9 @@ class FermionicHaloscope(Experiment):
         print(' a1 =', self.station.redpitaya.OUT1_amplitude(), 'V \t\ta2 =', self.station.redpitaya.OUT2_amplitude(), 'V')
 
         # turn on the generators
-        self.station.redpitaya.OUT1_status('ON')
-        self.station.redpitaya.OUT2_status('ON')
-        print('\n outputs on\n')
+        self.station.redpitaya.OUT1_status('OFF')
+        self.station.redpitaya.OUT2_status('OFF')
+        print('\n outputs ready\n')
 
         # initiate the real acquisition
         waveforms_number = self.station.redpitaya.estimate_waveform_number(duration=data_saver_periodicity/2)
@@ -442,10 +450,16 @@ class FermionicHaloscope(Experiment):
 
             # suppress annoying output
             with open(os.devnull, "w") as f, contextlib.redirect_stdout(f):
+
                 # channel 1
+                self.station.redpitaya.OUT1_status('ON')
                 do0d(self.station.redpitaya.IN1, measurement_name='data ch1', log_info='Channel 1');
+                self.station.redpitaya.OUT1_status('OFF')
+
                 # channel 2
+                self.station.redpitaya.OUT2_status('ON')
                 do0d(self.station.redpitaya.IN2, measurement_name='data ch2', log_info='Channel 2');
+                self.station.redpitaya.OUT2_status('OFF')
 
             #time.sleep(data_saver_periodicity)
             # add sensor data to the logs
@@ -477,7 +491,6 @@ class FermionicHaloscope(Experiment):
         time.sleep(1)
         print('\nRun completed.')
 
-
     def generate_simulated_run_data(self, f1=5e6, a1=1, f2=6e6, a2=1, phase_noise=1e-8, amplitude_noise=1e-5, number_of_traces=1000, axion_signal=True, aa=1e-8, fa=2e3, common_noise_frequency = 1e3, common_noise_amplitude = 1e-5):
         # This function generates fake data which look like the ones of a real experimental run, it can be 
         # used to test the analysis routines with different parameters. One can add the axion signal with specific
@@ -487,7 +500,7 @@ class FermionicHaloscope(Experiment):
         fs = self.sampling_frequency
         trace_length = self.buffer_length
 
-        t = np.linspace(0,trace_length / fs, trace_length)
+        t = np.linspace(0, trace_length / fs, trace_length)
 
         data1 = np.zeros((trace_length, number_of_traces))
         data2 = np.zeros((trace_length, number_of_traces))
@@ -507,21 +520,146 @@ class FermionicHaloscope(Experiment):
 
             # channel 1
             if axion_signal == True:
-                data1[:,i] = a1 * np.sin(2*np.pi*f1 * t + 2*np.pi * np.random.uniform() + axion + phase_noise_trace + common) + amplitude_noise_trace
+                data1[:,i] = a1 * np.sin(2*np.pi*f1 * t + 2*np.pi * 0*np.random.uniform() + axion + phase_noise_trace + common) + amplitude_noise_trace
             else:
-                data1[:,i] = a1 * np.sin(2*np.pi*f1 * t + 2*np.pi * np.random.uniform() + phase_noise_trace + common) + amplitude_noise_trace
+                data1[:,i] = a1 * np.sin(2*np.pi*f1 * t + 2*np.pi * 0*np.random.uniform() + phase_noise_trace + common) + amplitude_noise_trace
 
             # channel 2
-            data2[:,i] = a2 * np.sin(2*np.pi*f2 * t + 2*np.pi * np.random.uniform() + phase_noise_trace + common) + amplitude_noise_trace
+            data2[:,i] = a2 * np.sin(2*np.pi*f2 * t + 2*np.pi * 0*np.random.uniform() + phase_noise_trace + common) + amplitude_noise_trace
 
 
         return t, np.rot90(data1), np.rot90(data2)
 
-    def analyse_run(self, data1, data2):
+    def analyse_run(self, run, blocks_to_analyse=1, mode='phase_noise_rejection', window='blackman', output_magnetic_field=True):
         # Simple analysis routine to extract the limit on the effective magnetic field starting from the run data
-        # of the fermionic interferometer.
+        # of the fermionic interferometer. From the raw data this function outputs an averaged interferometric measurement
+        # which can be used to calculate an upper limit on the axion signal.
 
-        return 0
+        print('Loading data')
+        RUN = run.split('_')[1]
+
+        # open logfile and find the date corresponding to the run number
+        logfile_run = os.path.join(os.path.dirname(self.logs_path), 'runs.txt')
+        
+        with open(logfile_run, "r") as rlog:
+            for ln in rlog:
+                if ln.startswith(RUN):
+                    date = ln.split('\t')[1][6:10] + '-' + ln.split('\t')[1][3:5] + '-' + ln.split('\t')[1][:2]
+            db_date = os.path.join(self.data_path[:-10], date)
+
+        # create a database which contains the characterisation measurements
+        db_name = run + '_experiment_data.db'
+        db_path = os.path.join(db_date, db_name)
+        print(' loading data from', db_path)
+        initialise_or_create_database_at(db_path)
+        print(' ' + run + ' data loaded')
+
+        print('\nInterferometric down-conversion')
+        f1 = self.experiment_parameters['f1']
+        f2 = self.experiment_parameters['f2']
+        print(' north arm frequency', str(f1/1e6),'MHz, east arm frequency', str(f2/1e6), 'MHz')
+
+        if mode == 'phase_noise_rejection':
+            delta  = np.pi / 1.00
+        if mode == 'amplitude_noise_rejection':
+            delta = np.pi / 2.00
+        print(' ' + mode + ' mode selected')
+
+        BUFFER = self.buffer_length
+        # create a numerical time
+        t = np.linspace(0, BUFFER-1, BUFFER)
+
+        # frequency to be used for the down-conversion
+        downconversion_frequency = (f1 + f2)/2
+        print(' down-conversion frequency set to', str(downconversion_frequency/1e6), 'MHz')
+        # offset to be taken into account to calculate the signal frequency
+        downconverted_frequency_origin = (f2 - f1)/2
+
+        # actual down-conversion signal
+        downconversion_signal = np.sin( 2*np.pi * downconversion_frequency * t / self.sampling_frequency + delta)
+
+        # going through the runs in the database and average them
+        index = 0
+
+        # final spectrum initialisation
+        interference_psd_avg = np.zeros(BUFFER // 2 + 1)
+
+        print('\nAnalysis and averaging')
+        print(' in progress')
+
+        pbar = tqdm(total=blocks_to_analyse)
+
+        while (index <= blocks_to_analyse):
+            # data 1
+            dataset1 = load_by_run_spec(captured_run_id=index + 1)
+            data1 = dataset1.get_parameter_data('redpitaya_IN1')['redpitaya_IN1']['redpitaya_IN1']
+            # data 2
+            dataset2 = load_by_run_spec(captured_run_id=index + 2)
+            data2 = dataset2.get_parameter_data('redpitaya_IN2')['redpitaya_IN2']['redpitaya_IN2']
+            
+            if len(data1) != len(data2):
+                raise ValueError('The length of the two datasets are different.')
+            else: 
+                L = len(data1)
+
+            interference = np.zeros((BUFFER, L))
+            waveforms = np.linspace(1, L-1, L, dtype=int)
+            
+            for waveform_index in waveforms:
+                # downconversion interferometry  
+                interference[:, waveform_index] = self.mixer(data1[waveform_index] + data2[waveform_index], downconversion_signal)
+
+                # calculating the power spectral densities
+                ps = periodogram(interference[:,waveform_index], fs=self.sampling_frequency, window=window, scaling='spectrum')
+
+                interference_f = ps[0] - downconverted_frequency_origin
+                interference_psd_avg += ps[1]
+            
+            index+=2
+            pbar.update(2)
+
+        pbar.close()
+
+        interference_psd_avg = interference_psd_avg / L / blocks_to_analyse
+        print(' averaging completed')
+
+        if output_magnetic_field == True:
+            interference_f, interference_psd_field_avg = self.volt_to_magnetic_field(interference_f, interference_psd_avg)
+            return interference_f, interference_psd_field_avg
+        else:
+            # the output frequency is in hertz while the magnitude is in volts
+            return interference_f, interference_psd_avg
+
+    # experiment-specific functions
+    def volt_to_magnetic_field(self, frequency, voltage_spectrum):
+        # This functions calculate the effective field limit given the output spectrum of a run.
+        # It is important to remember that the calculation is based on the parameters initialised
+        # with the haloscope, which need to be the correct one which were used during the run.
+
+        N = len(frequency)
+
+        f = self.experiment_parameters['f1'] + self.experiment_parameters['f2'] / 2 
+        k = self.experiment_parameters['k1'] + self.experiment_parameters['k2'] / 2 
+        Q = f / k
+
+        Ap = np.sqrt(np.max(voltage_spectrum))
+        magnetic_spectrum = np.zeros(N)
+
+        for i in range(N):
+            An = np.sqrt(voltage_spectrum[i])
+
+            # we can use get_b_sensitivity() also to get the actual magnetic field limt
+            magnetic_spectrum[i] = self.get_b_sensitivity(f = f,
+                                                          Q = Q,
+                                                          An = An,
+                                                          Ap = Ap)
+
+        # the acquired spectrum needs to be normalised with the linewidth of the resonator
+        resonance = self.lorentzian(frequency, 0, 1, k)
+        magnetic_spectrum = magnetic_spectrum / resonance
+
+        return frequency, magnetic_spectrum
+
 
 
 class Haloscope(Experiment):

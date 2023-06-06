@@ -19,8 +19,12 @@ class OHUtils():
 
     # unit conversions
     def eV_to_Hz(m):
-        f = m * c.e / c.hbar  / (2 * c.pi)
+        f = m * c.e / c.hbar / (2 * c.pi)
         return f
+
+    def Hz_to_eV(f):
+        m = f / c.e * c.hbar * (2 * c.pi)
+        return m
 
     # helper functions
     def load_experiment_json(haloscope_name):

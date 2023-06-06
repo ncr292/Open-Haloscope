@@ -772,7 +772,6 @@ class Redpitaya(VisaInstrument):
                             get_cmd='ACQ:AVG?'
                             )
         
-        
         # trigger
         self.add_parameter( name='ADC_trigger',
                             label='Disable triggering, trigger immediately or set trigger source and edge',
@@ -1270,7 +1269,7 @@ class Redpitaya(VisaInstrument):
 
 
     # composite acquisition functions
-    def get_data(self, channel, waveforms_number, data_type='ASCII', disable_pbar=True):
+    def get_data(self, channel, waveforms_number, data_type='BIN', disable_pbar=True):
     # This is the core part of the measurement, with a defined measurement length it
     # keeps reading and emptying the Redpitaya buffer, concatenating the waveforms.
 
@@ -1281,7 +1280,8 @@ class Redpitaya(VisaInstrument):
         t = 0.0
         index = 0
         duration = self.estimate_acquisition_length()
-
+        self.ADC_trigger_level(0.0)
+        
         """
         Ci sono ancora diversi problemi.
         Ad esempio il duty cycle fa schifo.
@@ -1294,16 +1294,18 @@ class Redpitaya(VisaInstrument):
             time.sleep(0.2)
 
             t0 = time.time()
-            self.ADC_write_pointer(0)
             pbar = tqdm(total=waveforms_number, disable=disable_pbar)
+
+            if channel == 1:
+                self.ADC_trigger('CH1_PE')
+            if channel == 2:
+                self.ADC_trigger('CH2_PE')
 
             while index < waveforms_number:
                 index += 1
 
                 # trigger the ADC and refill the buffer
                 self.ADC_start()
-                self.ADC_write_pointer(0)
-                self.ADC_trigger('NOW')
 
                 # read all the data
                 while 1:
@@ -1311,13 +1313,13 @@ class Redpitaya(VisaInstrument):
                         break
 
                 # this reduced the maximum duty cycle to 75%            
-                #time.sleep(1.0 * BLOCK / self.FS)
+                time.sleep(1.5 * BLOCK / self.FS)
 
                 data += self.ADC_read_N_after_trigger(channel, BLOCK)[1:-1] + ','
 
                 # increment the waveform number
                 #self.number_of_waveforms(index)
-                trash = self.get_output()
+                #trash = self.get_output()
 
                 pbar.update(1)
                 self.ADC_stop()
@@ -1334,7 +1336,6 @@ class Redpitaya(VisaInstrument):
 
             return data_line    
 
-
         elif data_type == 'BIN':
             # One can choose the data format to be used
             # binary is fast, using it improves the duty cycle
@@ -1342,37 +1343,40 @@ class Redpitaya(VisaInstrument):
             time.sleep(0.2)
 
             t0 = time.time()
-            #self.ADC_write_pointer(0)
             pbar = tqdm(total=waveforms_number, disable=disable_pbar)
 
             while index < waveforms_number:
                 index += 1
 
-                # trigger the ADC and refill the buffer
+                # starting the ADC
                 self.ADC_start()
-                self.ADC_write_pointer(0)
-                self.ADC_trigger('NOW')
 
                 # read all the data
+                if channel == 1:
+                    self.ADC_trigger('CH1_PE')
+                if channel == 2:
+                    self.ADC_trigger('CH2_PE')
+
                 while 1:
                     if self.ADC_trigger() == 'TD':
+                        self.ADC_trigger('DISABLED')
                         break
 
                 # this reduced the maximum duty cycle to 50%
-                #time.sleep(1.0 * BLOCK / self.FS)
+                #time.sleep(1 * BLOCK / self.FS * self.ADC_decimation())
 
-                new_waveform = self.ADC_read_N_after_trigger_bin(channel, BLOCK)
+                #new_waveform = self.ADC_read_N_after_trigger_bin(channel, BLOCK)
+                new_waveform = self.ADC_read_buffer_bin(channel)
                 data = np.append(data, new_waveform)
-                #print(data)
 
                 #self.number_of_waveforms(index)
-                trash = self.get_output()
+                #self.ADC_stop()
 
                 pbar.update(1)
-                self.ADC_stop()
 
             pbar.close()
             time.sleep(0.2)
+            self.ADC_stop()
 
             # update the time which passed from the beginning of the run and the wavefor index
             t = time.time() - t0

@@ -72,6 +72,11 @@ class DMAxion(Particle):
 
         return
 
+    # calculate and plot an upper limit extracted by a magnetic field measurement
+    def exclusion_plot(self, frequency, magnetic_field_std):
+
+        pass
+
 
 class RelicNeutrino(Particle):
     def __init__(self, *args, **kwargs):
