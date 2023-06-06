@@ -5,10 +5,10 @@
  The search for axions is performed with earth-based experiments called haloscopes from the dark matter halo of the Milky Way.
  To build an haloscope, one normally needs a particle physics laboratory, a team of physicists and engineers, and millions of euros.
  
- This project implements a fermionic axion interferometer based on the axion-spin interaction. Conversely to usual haloscopes, it can be built by anybody, in a garage, and at a cost of a two to three hundred euros. A complete experimental setup allows for characterisation measurements, data acquisition and processing, data analysis, and eventually leads to investigating the existence of dark matter axions[^1].
+ This project implements a fermionic axion interferometer based on the axion-spin interaction. Conversely to usual haloscopes, it can be built by anybody, in a garage, and for a cost of two to three hundred euros. A complete experimental setup allows for characterisation measurements, data acquisition and processing, data analysis, and eventually leads to investigating the existence of dark matter axions[^1].
  
  A quick summary of the experiment is hereafter.
- For more detailed information, building instructions, and notes for number crunchers, please refer to the wiki of the project.
+ For more detailed information, building instructions, and some notes for number crunchers, please refer to the wiki of the project.
  
  ---
  
