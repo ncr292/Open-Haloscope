@@ -681,6 +681,7 @@ class FermionicHaloscope(Experiment):
         sigma = sigmas * np.abs(folded_residuals)
 
         return f, sigma
+        
 
 class Haloscope(Experiment):
     def __init__(self, experiment_json):

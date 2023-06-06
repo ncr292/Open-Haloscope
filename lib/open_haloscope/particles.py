@@ -32,7 +32,6 @@ class DMAxion(Particle):
     ## Axions and friends
     # The axion class has all the parameter assumed for the DFSZ axion model, and features
     # some useful functions that are used to estimate the haloscope sensitivity.
-
     def __init__(self, *args, **kwargs):
         super().__init__(self)
         self.n_dm = 0.4e9 / (0.01**3)    # dark matter density in eV per cubic meter
@@ -41,7 +40,6 @@ class DMAxion(Particle):
         self.DFSZ_u = 1.0/3.0            # DFSZ axion upper limit
         self.DFSZ_l = 2.0e-5             # DFSZ axion upper limit
         self.gx = 8.943e-11              # coupling constant
-
 
     # print the axion and dark matter parameters
     def print_axion_parameters(self):
