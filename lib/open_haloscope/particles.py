@@ -9,12 +9,23 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import constants as c
 
+from .utils import OHUtils
+
 
 class Particle():
     def __init__(self, *args, **kwargs):
         # initialisation of the particle parameters, like coupling constants or other useful properties.
         self.mass = 125e9 # eV
         self.interaction_constant = 0
+
+    # unit conversion
+    def eV_to_Hz(self, m):
+        f = m * c.e / c.hbar / (2 * c.pi)
+        return f
+
+    def Hz_to_eV(self, f):
+        m = f / c.e * c.hbar * (2 * c.pi)
+        return m
 
 
 class DMAxion(Particle):
@@ -68,14 +79,20 @@ class DMAxion(Particle):
         plt.loglog(mass, DMAxion.g_x(self, DFSZ_l, mass), '-', lw=3.5, c='black', alpha=0.5)
         plt.loglog(mass, DMAxion.g_x(self, DFSZ_u, mass), '-', lw=3.5, c='black', alpha=0.5)
         plt.fill_between(mass, DMAxion.g_x(self, DFSZ_l, mass), y2=DMAxion.g_x(self, DFSZ_u, mass), facecolor='goldenrod', zorder=0, alpha=0.3)
-        plt.text(4*np.min(mass),  10*np.min(DMAxion.g_x(self, DFSZ_l, mass)), 'DFSZ axion', rotation=20)
+        plt.text(4*np.min(mass),  100*np.min(DMAxion.g_x(self, DFSZ_l, mass)), 'DFSZ axion', rotation=0)
 
         return
 
     # calculate and plot an upper limit extracted by a magnetic field measurement
     def exclusion_plot(self, frequency, magnetic_field_std):
+        # from the residuals upper limit one can extract the exclusion plot corresponding to the
+        # measurements. So with frequency and magnetic field limit as input this function calculates
+        # the limit which can be used in an exclusion plot.
 
-        pass
+        m_a = self.Hz_to_eV(frequency)
+        g_p = self.field_to_g_p(magnetic_field_std)
+
+        return m_a, g_p
 
 
 class RelicNeutrino(Particle):

@@ -104,6 +104,9 @@ class Experiment():
         
         return x + 1j*y
 
+    def dB(self, x):
+        return 10 * np.log10(x)
+
     # useful functions
     def lorentzian(self, x, x0, a, gamma):
         return a * gamma**2 / ( gamma**2 + ( x - x0 )**2)
@@ -660,7 +663,24 @@ class FermionicHaloscope(Experiment):
 
         return frequency, magnetic_spectrum
 
+    def calculate_residuals_upper_limit(self, frequency, signal, background, sigmas=2):
+        # from an analysed run this function extracts the upper limit of no field for a given 
+        # confidence level. Default is 2sigma = 90% C.L. and signal and background need to be defined
+        # in the same frequency range.
 
+        zero_f = np.min(np.abs(frequency))
+        zero_index, = np.where(np.isclose(np.abs(frequency), zero_f))
+        # compute the frequency axis
+        f = np.linspace(zero_f, -frequency[0], zero_index[0])
+
+        # as an alternative to the background one can use a fitting function with the model of the background
+        residuals = signal - background
+        folded_residuals = (residuals[0:zero_index[0]] + np.flip(residuals[zero_index[0]:2*zero_index[0]])) / 2
+
+        # sigmas confidence level
+        sigma = sigmas * np.abs(folded_residuals)
+
+        return f, sigma
 
 class Haloscope(Experiment):
     def __init__(self, experiment_json):
