@@ -3,6 +3,7 @@
 
 import sys, os
 import numpy as np
+import matplotlib.pyplot as plt
 from scipy import constants as c
 
 
@@ -44,4 +45,16 @@ class OHUtils():
 
         return logs_path
 
-
+    def add_limit(fname, color, alpha=0.4, label=None, zorder=1):
+        dirname = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
+        data_folder = 'data'
+        limit_folder = 'limits'
+    
+        limit = os.path.join(dirname, data_folder, limit_folder, fname)
+        
+        x, y = np.loadtxt(limit, unpack=True)
+        plt.fill_between(x, y, 1, color=color, alpha=alpha,
+                         linewidth=0, zorder=zorder, label=label)
+        
+        plt.plot(x, y, color=color, linewidth=0, zorder=zorder+0.1)

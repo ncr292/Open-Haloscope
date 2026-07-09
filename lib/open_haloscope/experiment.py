@@ -14,12 +14,16 @@ import json
 import time
 import contextlib
 from datetime import datetime
-from tqdm import tqdm
+#from tqdm import tqdm
+from tqdm.notebook import tqdm
 
 import numpy as np
 from scipy.signal import butter, sosfilt, periodogram
 from scipy.optimize import curve_fit
+from scipy import stats
 from scipy import constants as c
+
+from joblib import Parallel, delayed
 
 import matplotlib.pyplot as plt
 # plot options
@@ -41,7 +45,7 @@ from qcodes.dataset import (do0d,
                             )
 
 # qcodes dummy instrument for time
-from qcodes.tests.instrument_mocks import DummyInstrument
+from qcodes.instrument_drivers.mock_instruments import DummyInstrument
 chrono = DummyInstrument('chrono', gates=['t0', 't1'])
 
 
@@ -494,7 +498,20 @@ class FermionicHaloscope(Experiment):
         time.sleep(1)
         print('\nRun completed.')
 
-    def generate_simulated_run_data(self, f1=5e6, a1=1, f2=6e6, a2=1, phase_noise=1e-8, amplitude_noise=1e-5, number_of_traces=1000, axion_signal=True, aa=1e-8, fa=2e3, common_noise_frequency = 1e3, common_noise_amplitude = 1e-5):
+    def generate_simulated_run_data(self, 
+                                    f1=5e6, 
+                                    a1=1, 
+                                    f2=6e6, 
+                                    a2=1, 
+                                    phase_noise=1e-8, 
+                                    amplitude_noise=1e-5, 
+                                    number_of_traces=1000, 
+                                    axion_signal=True, 
+                                    aa=1e-8, 
+                                    fa=2e3, 
+                                    common_noise_frequency = 1e3, 
+                                    common_noise_amplitude = 1e-5
+                                    ):
         # This function generates fake data which look like the ones of a real experimental run, it can be 
         # used to test the analysis routines with different parameters. One can add the axion signal with specific
         # frequency and amplitude (only applied on data1 for simplicity), and there is a common noise to evaluate
@@ -530,10 +547,19 @@ class FermionicHaloscope(Experiment):
             # channel 2
             data2[:,i] = a2 * np.sin(2*np.pi*f2 * t + 2*np.pi * 0*np.random.uniform() + phase_noise_trace + common) + amplitude_noise_trace
 
-
         return t, np.rot90(data1), np.rot90(data2)
-
-    def analyse_run(self, run, blocks_to_analyse=1, mode='phase_noise_rejection', window='blackman', output_magnetic_field=True):
+        
+        
+    """
+    def analyse_run(self, 
+                    run, 
+                    blocks_to_analyse=1, 
+                    mode='amplitude_noise_rejection', 
+                    window='blackman', 
+                    return_magnetic_field=True, 
+                    lorentzian_normalization=False,
+                    fold=True
+                   ):
         # Simple analysis routine to extract the limit on the effective magnetic field starting from the run data
         # of the fermionic interferometer. From the raw data this function outputs an averaged interferometric measurement
         # which can be used to calculate an upper limit on the axion signal.
@@ -563,106 +589,475 @@ class FermionicHaloscope(Experiment):
         print(' north arm frequency', str(f1/1e6),'MHz, east arm frequency', str(f2/1e6), 'MHz')
 
         if mode == 'phase_noise_rejection':
-            delta  = np.pi / 1.00
+            delta = np.pi / 1.00
         if mode == 'amplitude_noise_rejection':
             delta = np.pi / 2.00
         print(' ' + mode + ' mode selected')
 
         BUFFER = self.buffer_length
-        # create a numerical time
+        
         t = np.linspace(0, BUFFER-1, BUFFER)
-
-        # frequency to be used for the down-conversion
         downconversion_frequency = (f1 + f2)/2
         print(' down-conversion frequency set to', str(downconversion_frequency/1e6), 'MHz')
-        # offset to be taken into account to calculate the signal frequency
+        
         downconverted_frequency_origin = (f2 - f1)/2
-
-        # actual down-conversion signal
-        downconversion_signal = np.sin( 2*np.pi * downconversion_frequency * t / self.sampling_frequency + delta)
-
-        # going through the runs in the database and average them
+        downconversion_signal = np.sin(2*np.pi * downconversion_frequency * t / self.sampling_frequency + delta)
         index = 0
-
-        # final spectrum initialisation
-        interference_psd_avg = np.zeros(BUFFER // 2 + 1)
-
+        interference_spectrum_matrix = np.zeros((BUFFER // 2 + 1, blocks_to_analyse))
+        
         print('\nAnalysis and averaging')
         print(' in progress')
-
         pbar = tqdm(total=blocks_to_analyse)
-
-        while (index <= blocks_to_analyse):
-            # data 1
-            dataset1 = load_by_run_spec(captured_run_id=index + 1)
+        
+        while index < blocks_to_analyse:
+            dataset1 = load_by_run_spec(captured_run_id=2*index + 1)
             data1 = dataset1.get_parameter_data('redpitaya_IN1')['redpitaya_IN1']['redpitaya_IN1']
-            # data 2
-            dataset2 = load_by_run_spec(captured_run_id=index + 2)
+            dataset2 = load_by_run_spec(captured_run_id=2*index + 2)
             data2 = dataset2.get_parameter_data('redpitaya_IN2')['redpitaya_IN2']['redpitaya_IN2']
+
+            #print('data1 hash:', hash(data1.tobytes()) if hasattr(data1, 'tobytes') else [hash(d.tobytes()) for d in data1])
+            #print('data2 hash:', hash(data2.tobytes()) if hasattr(data2, 'tobytes') else [hash(d.tobytes()) for d in data2])
             
             if len(data1) != len(data2):
                 raise ValueError('The length of the two datasets are different.')
-            else: 
+            else:
                 L = len(data1)
 
+            # extract Ap from raw time traces before mixing
+            # peak amplitude = (max - min), averaged over all waveforms and both arms
+            Ap1 = np.mean([(np.max(data1[w]) - np.min(data1[w])) for w in range(L)])
+            Ap2 = np.mean([(np.max(data2[w]) - np.min(data2[w])) for w in range(L)])
+            Ap_measured = (Ap1 + Ap2) / 2
+                
             interference = np.zeros((BUFFER, L))
-            waveforms = np.linspace(1, L-1, L, dtype=int)
-            
-            for waveform_index in waveforms:
-                # downconversion interferometry  
-                interference[:, waveform_index] = self.mixer(data1[waveform_index] + data2[waveform_index], downconversion_signal)
-
-                # calculating the power spectral densities
-                ps = periodogram(interference[:,waveform_index], fs=self.sampling_frequency, window=window, scaling='spectrum')
-
+            for waveform_index in np.arange(L):
+                interference[:, waveform_index] = self.mixer(
+                    data1[waveform_index] + data2[waveform_index],
+                    downconversion_signal
+                )
+                ps = periodogram(interference[:, waveform_index], fs=self.sampling_frequency, window=window, scaling='spectrum')
                 interference_f = ps[0] - downconverted_frequency_origin
-                interference_psd_avg += ps[1]
+                if return_magnetic_field == True:
+                    _, ps_tesla = self.volt_to_magnetic_field(interference_f, ps[1] / L, Ap=Ap_measured, lorentzian_normalization=lorentzian_normalization)
+                    interference_spectrum_matrix[:, index] += ps_tesla
+                else:
+                    interference_spectrum_matrix[:, index] += ps[1] / L
+            index += 1
+            pbar.update(1)
             
-            index+=2
-            pbar.update(2)
-
         pbar.close()
 
-        interference_psd_avg = interference_psd_avg / L / blocks_to_analyse
-        print(' averaging completed')
+        if fold:
+            interference_f, interference_spectrum_matrix = self.fold_spectrum_matrix(
+                interference_f, interference_spectrum_matrix
+            )
+    
+        return interference_f, interference_spectrum_matrix
+    """
 
-        if output_magnetic_field == True:
-            interference_f, interference_psd_field_avg = self.volt_to_magnetic_field(interference_f, interference_psd_avg)
-            return interference_f, interference_psd_field_avg
-        else:
-            # the output frequency is in hertz while the magnitude is in volts
-            return interference_f, interference_psd_avg
+
+    def load_run_data(self, run, blocks_to_analyse, remove_block_initial_waveform = True):
+        """
+        Load raw time traces from a run.
+    
+        Returns
+        -------
+        data1 : list of np.ndarray
+            data1[i] has shape (n_waveforms, buffer_length)
+        data2 : list of np.ndarray
+            Same for the second channel.
+        """
+    
+        print("Loading data")
+    
+        RUN = run.split('_')[1]
+    
+        logfile_run = os.path.join(os.path.dirname(self.logs_path), "runs.txt")
+    
+        with open(logfile_run) as rlog:
+            for ln in rlog:
+                if ln.startswith(RUN):
+                    date = (
+                        ln.split('\t')[1][6:10] + '-'
+                        + ln.split('\t')[1][3:5] + '-'
+                        + ln.split('\t')[1][:2]
+                    )
+    
+        db_date = os.path.join(self.data_path[:-10], date)
+    
+        db_name = run + "_experiment_data.db"
+        db_path = os.path.join(db_date, db_name)
+    
+        initialise_or_create_database_at(db_path)
+    
+        data1_blocks = []
+        data2_blocks = []
+    
+        for index in tqdm(range(blocks_to_analyse), desc="Loading"):
+    
+            dataset1 = load_by_run_spec(captured_run_id=2 * index + 1)
+            dataset2 = load_by_run_spec(captured_run_id=2 * index + 2)
+    
+            data1 = dataset1.get_parameter_data(
+                "redpitaya_IN1"
+            )["redpitaya_IN1"]["redpitaya_IN1"]
+    
+            data2 = dataset2.get_parameter_data(
+                "redpitaya_IN2"
+            )["redpitaya_IN2"]["redpitaya_IN2"]
+
+            if remove_block_initial_waveform:
+                # sometimes it is necessary to discard the first waveform of each data block
+                data1 = data1[1:]
+                data2 = data2[1:]
+    
+            data1_blocks.append(np.asarray(data1))
+            data2_blocks.append(np.asarray(data2))
+
+        data1_full = np.concatenate(data1_blocks, axis=0)
+        data2_full = np.concatenate(data2_blocks, axis=0)
+    
+        return data1_full, data2_full
+
+
+    def compute_interference_spectrum(
+        self,
+        data1,
+        data2,
+        mode='amplitude_noise_rejection',
+        window='blackman',
+        return_magnetic_field=True,
+        lorentzian_normalization=False,
+        ):
+        """
+        Down-convert and compute the interference spectrum for a full set of
+        concatenated waveforms (as returned by load_run_data).
+    
+        Parameters
+        ----------
+        data1, data2 : np.ndarray, shape (n_waveforms, buffer_length)
+            Output of load_run_data.
+    
+        Returns
+        -------
+        interference_f : np.ndarray, shape (buffer_length // 2 + 1,)
+        interference_spectrum_matrix : np.ndarray, shape (buffer_length // 2 + 1, n_waveforms)
+        """
+    
+        if len(data1) != len(data2):
+            raise ValueError('The length of the two datasets are different.')
+        L = len(data1)
+    
+        f1 = self.experiment_parameters['f1']
+        f2 = self.experiment_parameters['f2']
+        print(' north arm frequency', str(f1/1e6),'MHz, east arm frequency', str(f2/1e6), 'MHz')
+    
+        if mode == 'phase_noise_rejection':
+            delta = np.pi / 1.00
+        elif mode == 'amplitude_noise_rejection':
+            delta = np.pi / 2.00
+        print(' ' + mode + ' mode selected')
+    
+        BUFFER = self.buffer_length
+        t = np.linspace(0, BUFFER - 1, BUFFER)
+        downconversion_frequency = (f1 + f2) / 2
+        downconverted_frequency_origin = (f2 - f1) / 2
+        downconversion_signal = np.sin(
+            2 * np.pi * downconversion_frequency * t / self.sampling_frequency + delta
+        )
+        print(' down-conversion frequency set to', str(downconversion_frequency/1e6), 'MHz')
+
+    
+        # peak amplitude = (max - min), averaged over all waveforms and both arms
+        Ap1 = np.mean([(np.max(data1[w]) - np.min(data1[w])) for w in range(L)])
+        Ap2 = np.mean([(np.max(data2[w]) - np.min(data2[w])) for w in range(L)])
+        Ap_measured = (Ap1 + Ap2) / 2
+        print(' measured arm drive amplitude', Ap_measured, 'V')
+    
+        interference_spectrum_matrix = np.zeros((BUFFER // 2 + 1, L))
+        interference_f = None
+    
+        print('\nAnalysis and averaging')
+        print(' in progress')
+    
+        for waveform_index in tqdm(range(L), desc="Interfering"):
+            interference = self.mixer(
+                data1[waveform_index] + data2[waveform_index],
+                downconversion_signal
+            )
+            ps = periodogram(interference, fs=self.sampling_frequency, window=window, scaling='spectrum')
+            interference_f = ps[0] - downconverted_frequency_origin
+    
+            if return_magnetic_field:
+                _, ps_tesla = self.volt_to_magnetic_field(
+                    interference_f, ps[1],
+                    Ap=Ap_measured,
+                    lorentzian_normalization=lorentzian_normalization
+                )
+                interference_spectrum_matrix[:, waveform_index] = ps_tesla
+            else:
+                interference_spectrum_matrix[:, waveform_index] = ps[1] / L
+    
+        return interference_f, interference_spectrum_matrix
+        
+        
+        
+    def fold_spectrum_matrix(self, frequency, matrix):
+        """
+        Fold a two-sided spectrum (or spectrum-difference) matrix around zero
+        frequency, combining each positive-frequency bin with its mirrored
+        negative-frequency bin.
+    
+        Parameters
+        frequency : np.ndarray, shape (n_bins,)
+        matrix    : np.ndarray, shape (n_bins, n_blocks)
+    
+        Returns
+        folded_frequency : np.ndarray, shape (n_fold,)
+        folded_matrix    : np.ndarray, shape (n_fold, n_blocks)
+        """
+        zero_f = np.min(np.abs(frequency))
+        zero_index, = np.where(np.isclose(np.abs(frequency), zero_f))
+        zero_index = zero_index[0]
+    
+        folded_frequency = np.linspace(zero_f, -frequency[0], zero_index)
+        folded_matrix = (
+            matrix[0:zero_index, :] + np.flip(matrix[zero_index:2 * zero_index, :], axis=0)
+        ) / 2
+    
+        return folded_frequency, folded_matrix
+
+    
+    def vet_candidates(self, frequency, signal_matrix, background_matrix,
+                       sigma_threshold=3.0, outlier_fraction=0.6, neighbor_bins=2):
+        """
+        Vet candidate signal bins from a per-bin two-sample comparison.
+    
+        Parameters
+        frequency         : np.ndarray, shape (n_bins,), frequency axis in Hz
+        signal_matrix     : np.ndarray, shape (n_bins, n_blocks)
+        background_matrix : np.ndarray, shape (n_bins, n_blocks)
+        sigma_threshold   : float, detection threshold in sigma (default 3.0)
+        outlier_fraction  : float, minimum fraction of signal blocks above
+                            background mean to pass outlier check (default 0.6)
+        neighbor_bins     : int, number of bins on each side to check for
+                            broad spectral features (default 2)
+    
+        Returns
+        candidates : list of dict, one entry per bin above threshold,
+                     each with keys: bin, frequency, snr, excess, sigma,
+                     frac_above_bkg, check1_positive, check2_not_outlier,
+                     check3_isolated, flagged
+        """
+        assert signal_matrix.shape == background_matrix.shape, \
+            "Signal and background matrices must have the same shape."
+    
+        n_bins, n_blocks = signal_matrix.shape
+    
+        sig_mean = np.mean(signal_matrix, axis=1)
+        bkg_mean = np.mean(background_matrix, axis=1)
+        sig_var  = np.var(signal_matrix, axis=1, ddof=1)
+        bkg_var  = np.var(background_matrix, axis=1, ddof=1)
+    
+        excess = sig_mean - bkg_mean
+        sigma  = np.sqrt(sig_var / n_blocks + bkg_var / n_blocks)
+        snr    = excess / sigma
+    
+        candidates = []
+        for b in range(n_bins):
+            if snr[b] < sigma_threshold:
+                continue
+    
+            # check 1: excess must be positive -- negative means more power
+            # in background, which cannot be a signal
+            check1 = excess[b] > 0
+    
+            # check 2: excess must not be driven by a few outlier blocks --
+            # a real signal should lift the majority of blocks above the
+            # background mean uniformly
+            frac_above = np.mean(signal_matrix[b, :] > bkg_mean[b])
+            check2 = frac_above > outlier_fraction
+    
+            # check 3: excess must be isolated in a single bin -- a broad
+            # feature spanning multiple bins is a spectral artifact, not
+            # a narrow axion-like signal
+            neighbor_snrs = [
+                snr[b + d]
+                for d in range(-neighbor_bins, neighbor_bins + 1)
+                if d != 0 and 0 <= b + d < n_bins
+            ]
+            check3 = not any(ns > sigma_threshold for ns in neighbor_snrs)
+    
+            flagged = check1 and check2 and check3
+    
+            candidates.append({
+                'bin'               : b,
+                'frequency'         : frequency[b],
+                'snr'               : snr[b],
+                'excess'            : excess[b],
+                'sigma'             : sigma[b],
+                'frac_above_bkg'    : frac_above,
+                'check1_positive'   : check1,
+                'check2_not_outlier': check2,
+                'check3_isolated'   : check3,
+                'flagged'           : flagged,
+            })
+    
+        return candidates
+    
+
+    # parallelised injection test
+    def _single_trial(
+        self,
+        background_matrix,
+        injected_power,
+        inj_bin,
+        sigma_threshold,
+        outlier_fraction,
+        neighbor_bins,
+        confidence_level,
+    ):
+        n_bins, n_blocks = background_matrix.shape
+    
+        idx_sig = np.random.randint(0, n_blocks, n_blocks)
+        idx_bkg = np.random.randint(0, n_blocks, n_blocks)
+    
+        sim_background = background_matrix[:, idx_bkg]
+        sim_signal = background_matrix[:, idx_sig].copy()
+    
+        sim_signal[inj_bin, :] += injected_power
+    
+        dummy_f = np.arange(n_bins)
+    
+        _, ul, excess, sigma = self.calculate_upper_limit(
+            dummy_f,
+            sim_signal,
+            sim_background,
+            confidence_level=confidence_level,
+        )
+    
+        candidates = self.vet_candidates(
+            dummy_f,
+            sim_signal,
+            sim_background,
+            sigma_threshold=sigma_threshold,
+            outlier_fraction=outlier_fraction,
+            neighbor_bins=neighbor_bins,
+        )
+    
+        detected = any(
+            (c["flagged"] and c["bin"] == inj_bin)
+            for c in candidates
+        )
+    
+        return excess[inj_bin], ul[inj_bin], detected
+
+    
+    def injection_test_parallel(
+        self,
+        background_matrix,
+        injected_power,
+        injection_bins=None,
+        sigma_threshold=3.0,
+        outlier_fraction=0.6,
+        neighbor_bins=2,
+        confidence_level=0.95,
+        n_trials=500,
+        n_jobs=-1,
+    ):
+        n_bins, _ = background_matrix.shape
+    
+        if injection_bins is None:
+            injection_bins = np.arange(n_bins)
+    
+        recovery_bias = np.full(n_bins, np.nan)
+        recovery_sigma = np.full(n_bins, np.nan)
+        detection_fraction = np.full(n_bins, np.nan)
+        mean_upper_limit = np.full(n_bins, np.nan)
+    
+        for inj_bin in tqdm(injection_bins, leave=False):
+    
+            results = Parallel(n_jobs=n_jobs)(
+                delayed(self._single_trial)(
+                    background_matrix,
+                    injected_power,
+                    inj_bin,
+                    sigma_threshold,
+                    outlier_fraction,
+                    neighbor_bins,
+                    confidence_level,
+                )
+                for _ in range(n_trials)
+            )
+    
+            excess_vals, ul_vals, detected_vals = zip(*results)
+    
+            excess_vals = np.array(excess_vals)
+            ul_vals = np.array(ul_vals)
+            detected_vals = np.array(detected_vals)
+    
+            recovery_bias[inj_bin] = np.mean(excess_vals) - injected_power
+            recovery_sigma[inj_bin] = np.std(excess_vals)
+            detection_fraction[inj_bin] = np.mean(detected_vals)
+            mean_upper_limit[inj_bin] = np.mean(ul_vals)
+    
+        return recovery_bias, recovery_sigma, detection_fraction, mean_upper_limit
+        
+        
+
+    def calculate_upper_limit(self, frequency, signal_matrix,
+                              background_matrix, confidence_level=0.95):
+        """
+        Compute a per-bin Bayesian upper limit on excess power from two power spectra
+        matrices, using a truncated Gaussian posterior with a flat non-negative
+        prior on the signal power. Assumes signal_matrix and background_matrix
+        have already been folded (if desired) by analyse_run -- this function
+        is purely statistical and has no notion of frequency structure.
+        """
+        assert signal_matrix.shape == background_matrix.shape, \
+            "Signal and background matrices must have the same shape."
+    
+        n_bins, n_blocks = signal_matrix.shape
+    
+        excess = np.mean(signal_matrix, axis=1) - np.mean(background_matrix, axis=1)
+        sigma  = np.sqrt(
+            np.var(signal_matrix, axis=1, ddof=1) / n_blocks +
+            np.var(background_matrix, axis=1, ddof=1) / n_blocks
+        )
+    
+        upper_limit = np.zeros(n_bins)
+        for i in range(n_bins):
+            a = -excess[i] / sigma[i]
+            dist = stats.truncnorm(a=a, b=np.inf, loc=excess[i], scale=sigma[i])
+            upper_limit[i] = dist.ppf(confidence_level)
+    
+        return frequency, upper_limit, excess, sigma
+    
+        
 
     # experiment-specific functions
-    def volt_to_magnetic_field(self, frequency, voltage_spectrum):
-        # This functions calculate the effective field limit given the output spectrum of a run.
-        # It is important to remember that the calculation is based on the parameters initialised
-        # with the haloscope, which need to be the correct one which were used during the run.
-
-        N = len(frequency)
-
-        f = self.experiment_parameters['f1'] + self.experiment_parameters['f2'] / 2 
-        k = self.experiment_parameters['k1'] + self.experiment_parameters['k2'] / 2 
-        Q = f / k
-
-        Ap = np.sqrt(np.max(voltage_spectrum))
-        magnetic_spectrum = np.zeros(N)
-
-        for i in range(N):
-            An = np.sqrt(voltage_spectrum[i])
-
-            # we can use get_b_sensitivity() also to get the actual magnetic field limt
-            magnetic_spectrum[i] = self.get_b_sensitivity(f = f,
-                                                          Q = Q,
-                                                          An = An,
-                                                          Ap = Ap)
-
-        # the acquired spectrum needs to be normalised with the linewidth of the resonator
+    def volt_to_magnetic_field(self, frequency, voltage_spectrum, Ap, lorentzian_normalization=False):
+        
+        f = (self.experiment_parameters['f1'] + self.experiment_parameters['f2']) / 2
+        k = (self.experiment_parameters['k1'] + self.experiment_parameters['k2']) / 2
+        #Q = f / k
+        
+        gamma = c.physical_constants['electron gyromag. ratio in MHz/T'][0] * 1e6
+        volt_to_tesla = 2 * k / (np.pi * gamma * Ap)
+    
+        magnetic_spectrum = volt_to_tesla * np.sqrt(voltage_spectrum)
         resonance = self.lorentzian(frequency, 0, 1, k)
-        magnetic_spectrum = magnetic_spectrum / resonance
 
+        if lorentzian_normalization == True:        
+            if voltage_spectrum.ndim == 2:
+                magnetic_spectrum = magnetic_spectrum / resonance[:, np.newaxis]
+            else:
+                magnetic_spectrum = magnetic_spectrum / resonance            
+    
         return frequency, magnetic_spectrum
 
+        
+"""
     def calculate_residuals_upper_limit(self, frequency, signal, background, sigmas=2):
         # from an analysed run this function extracts the upper limit of no field for a given 
         # confidence level. Default is 2sigma = 90% C.L. and signal and background need to be defined
@@ -681,7 +1076,8 @@ class FermionicHaloscope(Experiment):
         sigma = sigmas * np.abs(folded_residuals)
 
         return f, sigma
-        
+"""
+
 
 class Haloscope(Experiment):
     def __init__(self, experiment_json):
